@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
 	"geocheck"
 )
@@ -21,11 +22,27 @@ func main() {
 		fmt.Print(text(msgUsage))
 		return
 	}
+	paths := getAppPaths()
+	isRoot := os.Geteuid() == 0
 	var err error
 	args := os.Args[2:]
 	switch os.Args[1] {
+	case "install":
+		err = newInstaller(paths).commandInstall(args)
+	case "uninstall":
+		err = newInstaller(paths).commandUninstall()
+	case "status":
+		err = commandStatus(paths, time.Now(), os.Stdout)
+	case "check":
+		err = commandCheck(paths, os.Stdout)
+	case "pause":
+		err = commandPause(paths, args, time.Now(), isRoot, os.Stdout)
+	case "resume":
+		err = commandResume(paths, isRoot, os.Stdout)
 	case "hosts":
-		err = commandHosts(getHostsPath(), args, os.Stdout)
+		err = commandHosts(paths.Hosts, args, os.Stdout, newInstaller(paths).commandRemoveBlock)
+	case "service":
+		err = commandService(paths)
 	case "help", "-h", "--help":
 		fmt.Print(text(msgUsage))
 		return
@@ -52,13 +69,17 @@ func newFlagSet(name string) *flag.FlagSet {
 }
 
 // commandHosts shows the change of the hosts file for a block of the providers. It only reads the hosts file.
-// The service writes the file. The command does not, until the real tests of the block are complete.
-func commandHosts(hostsPath string, args []string, stdout io.Writer) error {
+// With --remove, it removes the clawdiator block without the service. This is the recovery after a wrong block.
+func commandHosts(hostsPath string, args []string, stdout io.Writer, removeBlock func() error) error {
 	flags := newFlagSet("hosts")
 	isDryRun := flags.Bool("dry-run", false, text(msgFlagDryRun))
+	isRemove := flags.Bool("remove", false, text(msgFlagRemove))
 	providerNames := flags.String("providers", "anthropic,openai", text(msgFlagProviders))
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if *isRemove {
+		return removeBlock()
 	}
 	if !*isDryRun {
 		return errorf(msgOnlyDryRun)

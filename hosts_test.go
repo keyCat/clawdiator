@@ -171,7 +171,7 @@ func TestCommandHostsDryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout bytes.Buffer
-	if err := commandHosts(path, []string{"--dry-run", "--providers", "anthropic"}, &stdout); err != nil {
+	if err := commandHosts(path, []string{"--dry-run", "--providers", "anthropic"}, &stdout, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(stdout.String(), "0.0.0.0 api.anthropic.com") || strings.Contains(stdout.String(), "api.openai.com") {
@@ -181,13 +181,18 @@ func TestCommandHostsDryRun(t *testing.T) {
 		t.Error("the dry run must not change the file")
 	}
 	stdout.Reset()
-	if err := commandHosts(path, []string{"--dry-run", "--providers", ""}, &stdout); err != nil || !strings.Contains(stdout.String(), "already has this content") {
+	if err := commandHosts(path, []string{"--dry-run", "--providers", ""}, &stdout, nil); err != nil || !strings.Contains(stdout.String(), "already has this content") {
 		t.Errorf("no providers and no block must give no change: %v\n%s", err, stdout.String())
 	}
-	if err := commandHosts(path, []string{"--providers", "anthropic"}, &stdout); err == nil {
+	if err := commandHosts(path, []string{"--providers", "anthropic"}, &stdout, nil); err == nil {
 		t.Error("without --dry-run, the command must fail")
 	}
-	if err := commandHosts(path, []string{"--dry-run", "--providers", "google"}, &stdout); err == nil {
+	if err := commandHosts(path, []string{"--dry-run", "--providers", "google"}, &stdout, nil); err == nil {
 		t.Error("an unknown provider must fail")
+	}
+	isRemoveCalled := false
+	removeBlock := func() error { isRemoveCalled = true; return nil }
+	if err := commandHosts(path, []string{"--remove"}, &stdout, removeBlock); err != nil || !isRemoveCalled {
+		t.Errorf("--remove must call the removal of the block: %v, %v", isRemoveCalled, err)
 	}
 }
