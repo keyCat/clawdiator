@@ -31,25 +31,29 @@ type installer struct {
 	consoleUserID func() int
 	// downloadDB downloads the file of the local database for the month into the app folder.
 	downloadDB func(ctx context.Context, month string) (*countryDB, error)
-	now        func() time.Time
-	user       string
-	stdin      io.Reader
-	stdout     io.Writer
+	// serviceStopTimeout is the maximum time to wait for the end of the service process.
+	// launchd sends SIGKILL 20 seconds after SIGTERM, so 30 seconds is enough.
+	serviceStopTimeout time.Duration
+	now                func() time.Time
+	user               string
+	stdin              io.Reader
+	stdout             io.Writer
 }
 
 func newInstaller(paths appPaths) *installer {
 	return &installer{
-		paths:         paths,
-		manager:       launchdManager{},
-		executable:    os.Executable,
-		isRoot:        func() bool { return os.Geteuid() == 0 },
-		flushDNS:      func() { _ = flushDNS() },
-		consoleUserID: getConsoleUserID,
-		downloadDB:    newDBDownloader(paths.Dir),
-		now:           time.Now,
-		user:          getUserName(),
-		stdin:         os.Stdin,
-		stdout:        os.Stdout,
+		paths:              paths,
+		manager:            launchdManager{},
+		executable:         os.Executable,
+		isRoot:             func() bool { return os.Geteuid() == 0 },
+		flushDNS:           func() { _ = flushDNS() },
+		consoleUserID:      getConsoleUserID,
+		downloadDB:         newDBDownloader(paths.Dir),
+		serviceStopTimeout: 30 * time.Second,
+		now:                time.Now,
+		user:               getUserName(),
+		stdin:              os.Stdin,
+		stdout:             os.Stdout,
 	}
 }
 
@@ -238,7 +242,7 @@ func (in *installer) commandUninstall() error {
 		report(msgStepStopAgents, in.manager.UninstallAgents(in.paths, in.consoleUserID()))
 	}
 	if in.paths.Plist != "" {
-		report(msgStepStopService, in.manager.Uninstall(in.paths))
+		report(msgStepStopService, in.stopService())
 	}
 	isChanged, err := writeHostsFile(in.paths.Hosts, nil)
 	if isChanged {
@@ -255,6 +259,31 @@ func (in *installer) commandUninstall() error {
 	}
 	fmt.Fprintln(in.stdout, text(msgUninstalled))
 	return nil
+}
+
+// stopService stops the service and waits for the end of its process, because launchctl bootout can return before the end.
+// The service saves state.json at its end. Without the wait, it can write into the app folder that uninstall removes.
+// The service holds its lock until the end of its process, so a free lock shows the end.
+func (in *installer) stopService() error {
+	if err := in.manager.Uninstall(in.paths); err != nil {
+		return err
+	}
+	deadline := time.Now().Add(in.serviceStopTimeout)
+	for {
+		release, err := lockService(in.paths.Lock)
+		if err == nil {
+			release()
+			return nil
+		}
+		// Without the app folder, no service can run.
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the service process did not stop in %v: %w", in.serviceStopTimeout, err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // commandRemoveBlock removes the clawdiator block from the hosts file without the service.

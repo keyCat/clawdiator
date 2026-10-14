@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -79,11 +80,12 @@ func newTestInstaller(t *testing.T, answer string) (*installer, *fakeManager, *b
 		flushDNS:      func() {},
 		consoleUserID: func() int { return 501 },
 		// The tests never use the network. A test of the local database replaces this function.
-		downloadDB: func(context.Context, string) (*countryDB, error) { return nil, errOffline },
-		now:        func() time.Time { return testStart },
-		user:       "ivan",
-		stdin:      strings.NewReader(answer),
-		stdout:     &stdout,
+		downloadDB:         func(context.Context, string) (*countryDB, error) { return nil, errOffline },
+		serviceStopTimeout: 2 * time.Second,
+		now:                func() time.Time { return testStart },
+		user:               "ivan",
+		stdin:              strings.NewReader(answer),
+		stdout:             &stdout,
 	}
 	return in, manager, &stdout
 }
@@ -417,5 +419,52 @@ func TestInstallTrayAndAgents(t *testing.T) {
 	}
 	if manager.agentUninstalls != 1 {
 		t.Error("the uninstall must stop the agents")
+	}
+}
+
+// launchctl bootout can return before the end of the service. The service saves state.json at its end, then the lock is free.
+// Uninstall must wait for the free lock. Otherwise the service writes into the app folder during its removal.
+func TestUninstallWaitsForServiceEnd(t *testing.T) {
+	in, _, _ := newTestInstaller(t, "yes\n")
+	if err := in.commandInstall(nil); err != nil {
+		t.Fatal(err)
+	}
+	release, err := lockService(in.paths.Lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var isEnded atomic.Bool
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		isEnded.Store(true)
+		release()
+	}()
+	if err := in.commandUninstall(); err != nil {
+		t.Fatal(err)
+	}
+	if !isEnded.Load() {
+		t.Error("uninstall must wait for the end of the service")
+	}
+	if _, err := os.Stat(in.paths.Dir); !os.IsNotExist(err) {
+		t.Errorf("uninstall must remove the app folder: %v", err)
+	}
+}
+
+func TestUninstallWithServiceThatDoesNotStop(t *testing.T) {
+	in, _, stdout := newTestInstaller(t, "yes\n")
+	if err := in.commandInstall(nil); err != nil {
+		t.Fatal(err)
+	}
+	release, err := lockService(in.paths.Lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	in.serviceStopTimeout = 200 * time.Millisecond
+	if err := in.commandUninstall(); err == nil || !strings.Contains(stdout.String(), "the service process did not stop in 200ms") {
+		t.Errorf("a service that does not stop must give a failed step: %v\n%s", err, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "remove the block from the hosts file") {
+		t.Errorf("uninstall must continue after the failed step:\n%s", stdout.String())
 	}
 }
