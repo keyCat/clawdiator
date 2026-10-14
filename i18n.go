@@ -133,10 +133,13 @@ const (
 	msgStatusPausedUntil
 	msgStatusPreBlocked
 	msgStatusCountry
+	msgStatusLastFailure
 	msgStatusOpen
 	msgStatusBlocked
 	msgStatusHosts
 	msgStatusLog
+	msgFlagVerbose
+	msgFlagLines
 	msgServiceNotReachable
 	msgCheckStarted
 	msgCheckTooSoon
@@ -282,11 +285,16 @@ Type "yes" to agree: `,
 	msgStatusPausedUntil:   {"Pause: on until %s (user %s). The service blocks nothing.", "Пауза: включена до %s (пользователь %s). Служба ничего не блокирует."},
 	msgStatusPreBlocked: {"Pre-block: since %s. The network changed, and the full check did not pass yet.",
 		"Предварительная блокировка: с %s. Сеть изменилась, а полная проверка ещё не прошла."},
-	msgStatusCountry: {"Country: %s (last full check at %s)", "Страна: %s (последняя полная проверка в %s)"},
-	msgStatusOpen:    {"open", "открыт"},
-	msgStatusBlocked: {"BLOCKED", "ЗАБЛОКИРОВАН"},
-	msgStatusHosts:   {"Hosts file %s: %d hosts are blocked.", "Файл hosts %s: заблокировано хостов: %d."},
-	msgStatusLog:     {"Last lines of %s:", "Последние строки %s:"},
+	msgStatusCountry:     {"Country: %s (last full check at %s)", "Страна: %s (последняя полная проверка в %s)"},
+	msgStatusLastFailure: {"The last full check failed at %s: %s", "Последняя полная проверка не прошла в %s: %s"},
+	msgStatusOpen:        {"open", "открыт"},
+	msgStatusBlocked:     {"BLOCKED", "ЗАБЛОКИРОВАН"},
+	msgStatusHosts:       {"Hosts file %s: %d hosts are blocked.", "Файл hosts %s: заблокировано хостов: %d."},
+	msgStatusLog:         {"Last lines of %s:", "Последние строки %s:"},
+	msgFlagVerbose: {"show the end of the verbose log instead of the normal log",
+		"показать конец подробного журнала вместо обычного журнала"},
+	msgFlagLines: {"the number of log lines. The default is 10, or 50 with --verbose",
+		"число строк журнала. По умолчанию 10, или 50 с --verbose"},
 	msgServiceNotReachable: {"cannot reach the service. Make sure that it is installed and runs: %v",
 		"не удалось связаться со службой. Убедитесь, что она установлена и работает: %v"},
 	msgCheckStarted: {`The service started a full check. Run "clawdiator status" after some seconds.`,

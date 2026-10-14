@@ -32,7 +32,7 @@ func main() {
 	case "uninstall":
 		err = newInstaller(paths).commandUninstall()
 	case "status":
-		err = commandStatus(paths, time.Now(), os.Stdout)
+		err = commandStatus(paths, args, time.Now(), os.Stdout)
 	case "check":
 		err = commandCheck(paths, os.Stdout)
 	case "pause":

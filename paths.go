@@ -14,6 +14,8 @@ type appPaths struct {
 	Config string
 	State  string
 	Log    string
+	// DebugLog is the verbose log. The service always writes it. "status --verbose" shows its end.
+	DebugLog string
 	// Lock stops a second copy of the service.
 	Lock string
 	// SocketDir holds the check socket. All users can open it.
@@ -71,6 +73,7 @@ func newAppPaths(root string) appPaths {
 	paths.Config = filepath.Join(paths.Dir, "config.json")
 	paths.State = filepath.Join(paths.Dir, "state.json")
 	paths.Log = filepath.Join(paths.Dir, appName+".log")
+	paths.DebugLog = filepath.Join(paths.Dir, appName+"-debug.log")
 	paths.Lock = filepath.Join(paths.Dir, "service.lock")
 	paths.CheckSocket = filepath.Join(paths.SocketDir, "check.sock")
 	paths.ControlSocket = filepath.Join(paths.ControlDir, "control.sock")

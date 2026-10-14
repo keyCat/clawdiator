@@ -191,7 +191,7 @@ func TestCommandStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout bytes.Buffer
-	if err := commandStatus(in.paths, testStart.Add(10*time.Second), &stdout); err != nil {
+	if err := commandStatus(in.paths, nil, testStart.Add(10*time.Second), &stdout); err != nil {
 		t.Fatal(err)
 	}
 	output := stdout.String()
@@ -201,7 +201,7 @@ func TestCommandStatus(t *testing.T) {
 		}
 	}
 	stdout.Reset()
-	if err := commandStatus(in.paths, testStart.Add(time.Hour), &stdout); err != nil || !strings.Contains(stdout.String(), "the service does not work") {
+	if err := commandStatus(in.paths, nil, testStart.Add(time.Hour), &stdout); err != nil || !strings.Contains(stdout.String(), "the service does not work") {
 		t.Errorf("an old heartbeat must show that the service does not work: %v\n%s", err, stdout.String())
 	}
 }
@@ -234,5 +234,51 @@ func TestPauseCommandChecks(t *testing.T) {
 	}
 	if err := commandCheck(paths, &stdout); err == nil || !strings.Contains(err.Error(), "cannot reach the service") {
 		t.Errorf("a check without the service must give a clear error: %v", err)
+	}
+}
+
+func TestCommandStatusShowsLastFailure(t *testing.T) {
+	in, _, _ := newTestInstaller(t, "")
+	state := &serviceState{Heartbeat: testStart, IsPreBlocked: true, PreBlockSince: testStart}
+	state.LastFailure = checkFailure{Time: testStart, Error: "2 of 4 location services replied (ipinfo.io: HTTP 429)"}
+	if err := saveServiceState(in.paths.State, state); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	if err := commandStatus(in.paths, nil, testStart.Add(time.Second), &stdout); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "The last full check failed at") || !strings.Contains(stdout.String(), "ipinfo.io: HTTP 429") {
+		t.Errorf("the status must show the last failure:\n%s", stdout.String())
+	}
+}
+
+func TestCommandStatusVerbose(t *testing.T) {
+	in, _, _ := newTestInstaller(t, "")
+	if err := saveServiceState(in.paths.State, &serviceState{Heartbeat: testStart}); err != nil {
+		t.Fatal(err)
+	}
+	if err := appendLog(in.paths.Log, []string{"event line"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := appendLogLimit(in.paths.DebugLog, []string{"detail 1", "detail 2"}, maxDebugLogSize); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		args          []string
+		want, notWant string
+	}{
+		{nil, "event line", "detail"},
+		{[]string{"--verbose"}, "detail 1", "event line"},
+		{[]string{"--verbose", "--lines", "1"}, "detail 2", "detail 1"},
+	}
+	for _, testCase := range cases {
+		var stdout bytes.Buffer
+		if err := commandStatus(in.paths, testCase.args, testStart, &stdout); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(stdout.String(), testCase.want) || strings.Contains(stdout.String(), testCase.notWant) {
+			t.Errorf("status %v must show %q and not %q:\n%s", testCase.args, testCase.want, testCase.notWant, stdout.String())
+		}
 	}
 }

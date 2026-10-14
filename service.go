@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"runtime"
 	"slices"
+	"strings"
 	"syscall"
 	"time"
 
@@ -25,16 +26,19 @@ const (
 )
 
 // probeDone and checkDone carry the results of the goroutines back to the loop.
+// The duration goes to the verbose log.
 type probeDone struct {
 	Generation int
 	Location   geocheck.Location
 	Err        error
+	Duration   time.Duration
 }
 
 type checkDone struct {
 	Generation int
 	Result     geocheck.Result
 	Err        error
+	Duration   time.Duration
 }
 
 // serviceDriver connects the core to the system. Only the goroutine of run calls its methods,
@@ -49,7 +53,10 @@ type serviceDriver struct {
 	lookup         func(context.Context, geocheck.Options) (geocheck.Result, error)
 	getFingerprint func() string
 	writeHosts     func(hosts []string) (bool, error)
-	flushDNS       func()
+	// flushDNS returns the result of each flush command for the verbose log.
+	flushDNS func() string
+	// spawn starts a goroutine. The tests replace it to see the order of the steps.
+	spawn func(task func())
 
 	ctx         context.Context
 	results     chan any
@@ -67,7 +74,7 @@ type serviceDriver struct {
 
 // newServiceDriver returns a driver that uses the real system. The tests replace the functions.
 func newServiceDriver(ctx context.Context, c *core, paths appPaths, checkOptions geocheck.Options) *serviceDriver {
-	return &serviceDriver{
+	driver := &serviceDriver{
 		core:           c,
 		paths:          paths,
 		checkOptions:   checkOptions,
@@ -76,12 +83,22 @@ func newServiceDriver(ctx context.Context, c *core, paths appPaths, checkOptions
 		getFingerprint: getNetworkFingerprint,
 		writeHosts:     func(hosts []string) (bool, error) { return writeHostsFile(paths.Hosts, hosts) },
 		flushDNS:       flushDNS,
+		spawn:          func(task func()) { go task() },
 		ctx:            ctx,
 		results:        make(chan any, 8),
 		requests:       make(chan request),
 		savedSeq:       c.state.LastEventSeq,
 		loggedSeq:      c.state.LastEventSeq,
 	}
+	c.debugf = func(format string, args ...any) { driver.debugf("core", format, args...) }
+	return driver
+}
+
+// debugf writes 1 line to the verbose log. Only the goroutine of the loop calls it, so the lines do not mix.
+// The verbose log is a superset of the normal log: writeLog also writes the event lines to it.
+func (d *serviceDriver) debugf(component, format string, args ...any) {
+	line := d.now().Round(0).Format(debugTimeFormat) + " " + component + " " + cleanLogText(fmt.Sprintf(format, args...))
+	_ = appendLogLimit(d.paths.DebugLog, []string{line}, maxDebugLogSize)
 }
 
 // run is the loop of the service. It never waits for the network: the probes and the full checks run in other goroutines.
@@ -99,6 +116,7 @@ func (d *serviceDriver) run(ticks <-chan time.Time, networkChanges <-chan struct
 		case <-ticks:
 			d.handleTick()
 		case <-networkChanges:
+			d.debugf("network", "the system sent a message about a change of an interface or an address")
 			d.handleTick()
 		case result := <-d.results:
 			d.handleResult(result)
@@ -117,13 +135,34 @@ func (d *serviceDriver) handleResult(result any) {
 	now := d.now()
 	switch done := result.(type) {
 	case probeDone:
+		if done.Err != nil {
+			d.debugf("probe", "generation %d failed in %v: %v", done.Generation, done.Duration.Round(time.Millisecond), done.Err)
+		} else {
+			d.debugf("probe", "generation %d in %v: country %s, address %s", done.Generation, done.Duration.Round(time.Millisecond), done.Location.Country, done.Location.IP)
+		}
 		d.startActions(d.core.handleProbe(now, done.Generation, done.Location, done.Err))
 	case checkDone:
+		if done.Err != nil {
+			d.debugf("check", "generation %d failed in %v: %v", done.Generation, done.Duration.Round(time.Millisecond), done.Err)
+		} else {
+			d.debugf("check", "generation %d passed in %v: %s", done.Generation, done.Duration.Round(time.Millisecond), done.Result.Describe())
+		}
+		// Log a failed full check of the current generation. The error names each service and its failure.
+		// A new generation stops the old check, so a stopped check always has an older generation. It is not a failure.
+		if done.Err != nil && done.Generation == d.core.generation {
+			_ = appendLog(d.paths.Log, []string{now.Round(0).Format(time.RFC3339) + " all check-failed " + cleanLogText(done.Err.Error())})
+		}
 		d.core.handleCheck(now, done.Generation, done.Result, done.Err)
 	}
 }
 
 func (d *serviceDriver) handleRequest(received commandRequest) commandResponse {
+	response := d.answerRequest(received)
+	d.debugf("command", "%s from user %q: %s", received.Command, received.User, response.Code)
+	return response
+}
+
+func (d *serviceDriver) answerRequest(received commandRequest) commandResponse {
 	now := d.now()
 	switch received.Command {
 	case socketCheck:
@@ -131,7 +170,7 @@ func (d *serviceDriver) handleRequest(received commandRequest) commandResponse {
 			return commandResponse{Code: codeTooSoon}
 		}
 		d.lastUserCheck = now
-		d.startActions(d.core.requestCheck())
+		d.startActions(d.core.requestCheck("user command"))
 	case socketPause:
 		until := received.Until
 		if received.IsForever {
@@ -152,25 +191,35 @@ func (d *serviceDriver) handleRequest(received commandRequest) commandResponse {
 }
 
 // startActions starts a goroutine for each action. A new full check stops a running full check of an older generation.
+// It applies the block first. Then a pre-block is in the hosts file before any request of the new network,
+// and the flush of the DNS cache comes before the lookups of the check.
 func (d *serviceDriver) startActions(actions []action) {
+	if len(actions) == 0 {
+		return
+	}
+	d.applyBlock(d.now())
 	for _, next := range actions {
 		switch next.Kind {
 		case actionProbe:
-			go d.runProbe(next.Generation)
+			generation := next.Generation
+			d.spawn(func() { d.runProbe(generation) })
 		case actionFullCheck:
 			if d.cancelCheck != nil {
 				d.cancelCheck()
 			}
 			ctx, cancel := context.WithCancel(d.ctx)
 			d.cancelCheck = cancel
-			go d.runCheck(ctx, next)
+			d.debugf("check", "start generation %d, %d rounds, reason: %s", next.Generation, next.Rounds, next.Reason)
+			check := next
+			d.spawn(func() { d.runCheck(ctx, check) })
 		}
 	}
 }
 
 func (d *serviceDriver) runProbe(generation int) {
+	start := time.Now()
 	result, err := d.lookup(d.ctx, getProbeOptions())
-	done := probeDone{Generation: generation, Err: err}
+	done := probeDone{Generation: generation, Err: err, Duration: time.Since(start)}
 	if err == nil && len(result.Locations) > 0 {
 		done.Location = result.Locations[0]
 	}
@@ -180,8 +229,9 @@ func (d *serviceDriver) runProbe(generation int) {
 func (d *serviceDriver) runCheck(ctx context.Context, next action) {
 	options := d.checkOptions
 	options.Rounds = next.Rounds
+	start := time.Now()
 	result, err := d.lookup(ctx, options)
-	d.sendResult(checkDone{Generation: next.Generation, Result: result, Err: err})
+	d.sendResult(checkDone{Generation: next.Generation, Result: result, Err: err, Duration: time.Since(start)})
 }
 
 // sendResult gives the result to the loop. After the end of the service, nobody reads the channel, so the goroutine stops.
@@ -199,7 +249,9 @@ func (d *serviceDriver) afterStep(isFinal bool) {
 	d.writeLog()
 	state := d.core.state
 	if isFinal || state.LastEventSeq != d.savedSeq || now.Sub(d.lastSave) >= saveInterval {
-		if err := saveServiceState(d.paths.State, state); err == nil {
+		if err := saveServiceState(d.paths.State, state); err != nil {
+			d.debugf("state", "cannot save %s: %v", d.paths.State, err)
+		} else {
 			d.savedSeq = state.LastEventSeq
 			d.lastSave = now
 		}
@@ -215,6 +267,7 @@ func (d *serviceDriver) applyBlock(now time.Time) {
 	}
 	isChanged, err := d.writeHosts(hosts)
 	if err != nil {
+		d.debugf("hosts", "cannot write %d hosts: %v", len(hosts), err)
 		if message := "cannot change the hosts file: " + err.Error(); message != d.lastHostsErr {
 			d.lastHostsErr = message
 			d.core.addError(now, message)
@@ -223,29 +276,43 @@ func (d *serviceDriver) applyBlock(now time.Time) {
 	}
 	d.lastHostsErr = ""
 	d.appliedHosts, d.isApplied = hosts, true
+	providers := getProviderNames(d.core.state.blockedProviders())
+	if providers == "" {
+		providers = "none"
+	}
+	d.debugf("hosts", "blocked providers: %s (%d hosts). The file changed: %v", providers, len(hosts), isChanged)
 	if isChanged {
-		d.flushDNS()
+		d.debugf("dns", "flush: %s", d.flushDNS())
 	}
 }
 
 // writeLog writes the log lines of the new events.
 func (d *serviceDriver) writeLog() {
-	var lines []string
+	var lines, debugLines []string
 	for _, change := range d.core.state.Events {
 		if change.Seq > d.loggedSeq {
 			lines = append(lines, formatEventLog(change)...)
+			debugLines = append(debugLines, formatEventLogWith(change, debugTimeFormat)...)
 		}
 	}
 	if appendLog(d.paths.Log, lines) == nil {
 		d.loggedSeq = d.core.state.LastEventSeq
+		_ = appendLogLimit(d.paths.DebugLog, debugLines, maxDebugLogSize)
 	}
 }
 
-// flushDNS runs the flush commands of the system. A missing command is not an error, so the function ignores the errors.
-func flushDNS() {
+// flushDNS runs the flush commands of the system and returns the result of each command.
+// A missing command is not an error, for example nscd on most Linux systems. So the service only logs the results.
+func flushDNS() string {
+	var results []string
 	for _, command := range getDNSFlushCommands(runtime.GOOS) {
-		_ = exec.Command(command[0], command[1:]...).Run()
+		result := "ok"
+		if err := exec.Command(command[0], command[1:]...).Run(); err != nil {
+			result = err.Error()
+		}
+		results = append(results, strings.Join(command, " ")+": "+result)
 	}
+	return strings.Join(results, "; ")
 }
 
 // commandService is the start point of the service. The service manager starts it as root.
@@ -290,7 +357,10 @@ func runService(ctx context.Context, paths appPaths) error {
 	}
 	c := newCore(state, cfg.BlockedCountries)
 	driver := newServiceDriver(ctx, c, paths, checkOptions)
+	driver.debugf("service", "start: process %d, services %s, minimum replies %d, blocked countries %v, last event %d",
+		os.Getpid(), strings.Join(geocheck.ServiceNames(checkOptions.Services), ","), checkOptions.MinReplies, cfg.BlockedCountries, state.LastEventSeq)
 	for _, message := range startErrors {
+		driver.debugf("service", "%s", message)
 		c.addError(time.Now(), message)
 	}
 	checkListener, controlListener, err := listenSockets(paths)
@@ -305,6 +375,9 @@ func runService(ctx context.Context, paths appPaths) error {
 	driver.afterStep(true)
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
-	driver.run(ticker.C, watchNetwork(ctx))
+	networkChanges := watchNetwork(ctx)
+	driver.debugf("service", "network messages of the system: %v", networkChanges != nil)
+	driver.run(ticker.C, networkChanges)
+	driver.debugf("service", "stop")
 	return nil
 }

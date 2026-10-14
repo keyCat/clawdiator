@@ -38,7 +38,7 @@ func newInstaller(paths appPaths) *installer {
 		manager:    launchdManager{},
 		executable: os.Executable,
 		isRoot:     func() bool { return os.Geteuid() == 0 },
-		flushDNS:   flushDNS,
+		flushDNS:   func() { _ = flushDNS() },
 		now:        time.Now,
 		user:       getUserName(),
 		stdin:      os.Stdin,
@@ -209,9 +209,23 @@ func (in *installer) commandRemoveBlock() error {
 	return nil
 }
 
-// commandStatus shows the state of the service. It needs no administrator rights: it reads state.json and the log.
+// commandStatus shows the state of the service. It needs no administrator rights: it reads state.json and the logs.
 // The age of the heartbeat shows if the service works. launchctl can fail for a user who is not root.
-func commandStatus(paths appPaths, now time.Time, stdout io.Writer) error {
+// With --verbose, it shows the end of the verbose log instead of the end of the normal log.
+func commandStatus(paths appPaths, args []string, now time.Time, stdout io.Writer) error {
+	flags := newFlagSet("status")
+	isVerbose := flags.Bool("verbose", false, text(msgFlagVerbose))
+	lineCount := flags.Int("lines", 0, text(msgFlagLines))
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	logPath, defaultLines := paths.Log, 10
+	if *isVerbose {
+		logPath, defaultLines = paths.DebugLog, 50
+	}
+	if *lineCount <= 0 {
+		*lineCount = defaultLines
+	}
 	state, err := loadServiceState(paths.State)
 	if err != nil {
 		return errorf(msgCannotReadState, paths.State, err)
@@ -244,6 +258,9 @@ func commandStatus(paths appPaths, now time.Time, stdout io.Writer) error {
 	if !state.LastFullCheck.IsZero() {
 		fmt.Fprintln(stdout, text(msgStatusCountry, state.Country, formatTime(state.LastFullCheck)))
 	}
+	if state.LastFailure.Error != "" {
+		fmt.Fprintln(stdout, text(msgStatusLastFailure, formatTime(state.LastFailure.Time), state.LastFailure.Error))
+	}
 	blocked := state.blockedProviders()
 	for _, provider := range geocheck.Providers() {
 		word := text(msgStatusOpen)
@@ -255,8 +272,8 @@ func commandStatus(paths appPaths, now time.Time, stdout io.Writer) error {
 	if count, err := countBlockedHosts(paths.Hosts); err == nil {
 		fmt.Fprintln(stdout, text(msgStatusHosts, paths.Hosts, count))
 	}
-	if lines := readLastLines(paths.Log, 10); len(lines) > 0 {
-		fmt.Fprintln(stdout, text(msgStatusLog, paths.Log))
+	if lines := readLastLines(logPath, *lineCount); len(lines) > 0 {
+		fmt.Fprintln(stdout, text(msgStatusLog, logPath))
 		for _, line := range lines {
 			fmt.Fprintln(stdout, "  "+line)
 		}

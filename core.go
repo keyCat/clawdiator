@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/netip"
 	"slices"
 	"strings"
@@ -17,21 +18,42 @@ const (
 	fullCheckInterval = 60 * time.Minute
 	// probeFailureCheckInterval is the minimum time between 2 full checks that a failed probe starts.
 	probeFailureCheckInterval = 5 * time.Minute
-	// retryInterval is the time before the next full check after a failed full check.
+	// retryInterval is the time before the next full check after a failed full check, when no pre-block is on.
 	retryInterval = 30 * time.Second
-	// slowRetryInterval replaces retryInterval after slowRetryAfter failed full checks in a row.
+	// slowRetryInterval replaces the other waits after many failed full checks in a row.
 	// Many fast retries can go above the request limits of the location services.
 	slowRetryInterval = 5 * time.Minute
-	slowRetryAfter    = 4
+	// slowRetryAfter is the number of failed full checks in a row, without a pre-block, before the slow retries.
+	slowRetryAfter = 4
+	// preBlockSlowRetryAfter is the same number during a pre-block.
+	preBlockSlowRetryAfter = 10
 	// wakeGap is the gap between 2 ticks that counts as a wake from sleep.
 	// The driver calls tick every 2 seconds, so a longer gap means that the computer slept.
 	wakeGap = 30 * time.Second
 	// preBlockRounds is the number of lookups of a full check during a pre-block.
-	// The pre-block already blocks, so the service does not wait for more lookups. It tries again after retryInterval.
+	// The pre-block already blocks, so the service does not wait for more lookups. It tries again after preBlockRetryDelays.
 	preBlockRounds = 1
 	// steadyRounds is the number of lookups of a full check when the network did not change.
 	steadyRounds = 3
 )
+
+// preBlockRetryDelays are the waits after the first failed full checks during a pre-block.
+// The pre-block stops all access, so the service tries again soon. After the list, it waits the last value.
+var preBlockRetryDelays = []time.Duration{5 * time.Second, 10 * time.Second, 20 * time.Second, 30 * time.Second}
+
+// getRetryDelay returns the wait after the failed full check with the number failures in a row.
+func getRetryDelay(failures int, isPreBlocked bool) time.Duration {
+	if !isPreBlocked {
+		if failures >= slowRetryAfter {
+			return slowRetryInterval
+		}
+		return retryInterval
+	}
+	if failures >= preBlockSlowRetryAfter {
+		return slowRetryInterval
+	}
+	return preBlockRetryDelays[min(failures, len(preBlockRetryDelays))-1]
+}
 
 type actionKind int
 
@@ -49,6 +71,8 @@ type action struct {
 	Generation int
 	// Rounds is the number of lookups of a full check.
 	Rounds int
+	// Reason tells why the core started the full check. The verbose log shows it.
+	Reason string
 }
 
 // core holds the logic of the service. It reads no clock, so the tests can drive it with fixed times.
@@ -80,10 +104,19 @@ type core struct {
 	failures              int
 	nextRetry             time.Time
 	lastProbeFailureCheck time.Time
+	// debugf writes a line to the verbose log. The driver sets it. It can be nil.
+	debugf func(format string, args ...any)
 }
 
 func newCore(state *serviceState, blockedCountries []string) *core {
 	return &core{state: state, blockedCountries: blockedCountries}
+}
+
+// debug writes a line to the verbose log, if the driver gave a function for it.
+func (c *core) debug(format string, args ...any) {
+	if c.debugf != nil {
+		c.debugf(format, args...)
+	}
 }
 
 // tick runs every 2 seconds. The fingerprint identifies the network:
@@ -91,26 +124,36 @@ func newCore(state *serviceState, blockedCountries []string) *core {
 func (c *core) tick(now time.Time, fingerprint string) []action {
 	// Use the wall clock. The monotonic clock can stop while the computer sleeps.
 	now = now.Round(0)
-	isStart := c.lastTick.IsZero()
-	isWake := !isStart && now.Sub(c.lastTick) > wakeGap
-	isChange := isStart || isWake || fingerprint != c.fingerprint
+	var reason string
+	switch {
+	case c.lastTick.IsZero():
+		reason = "service start"
+		c.debug("network fingerprint %q", fingerprint)
+	case now.Sub(c.lastTick) > wakeGap:
+		reason = fmt.Sprintf("wake: %v without a pass", now.Sub(c.lastTick).Round(time.Second))
+	case fingerprint != c.fingerprint:
+		reason = "network change"
+		c.debug("network fingerprint %q -> %q", c.fingerprint, fingerprint)
+	}
 	c.lastTick = now
 	c.fingerprint = fingerprint
 	c.state.Heartbeat = now
 
 	if c.state.Pause.IsOn && !c.state.Pause.Until.IsZero() && !now.Before(c.state.Pause.Until) {
 		c.endPause(now)
-		isChange = true
+		if reason == "" {
+			reason = "end of the pause"
+		}
 	}
 	var actions []action
-	if isChange {
-		actions = append(actions, c.changeNetwork(now))
+	if reason != "" {
+		actions = append(actions, c.changeNetwork(now, reason))
 	}
 	if c.checkGeneration == 0 {
-		isRetryDue := c.failures > 0 && !now.Before(c.nextRetry)
-		isHourDue := c.failures == 0 && now.Sub(c.state.LastFullCheck) >= fullCheckInterval
-		if isRetryDue || isHourDue {
-			actions = append(actions, c.startCheck())
+		if c.failures > 0 && !now.Before(c.nextRetry) {
+			actions = append(actions, c.startCheck(fmt.Sprintf("retry after %d failed checks", c.failures)))
+		} else if c.failures == 0 && now.Sub(c.state.LastFullCheck) >= fullCheckInterval {
+			actions = append(actions, c.startCheck("hourly check"))
 		}
 	}
 	if !c.isProbeRunning && now.Sub(c.lastProbe) >= probeInterval {
@@ -123,49 +166,51 @@ func (c *core) tick(now time.Time, fingerprint string) []action {
 
 // changeNetwork starts a new generation and a full check.
 // Outside a pause, it blocks all providers until a full check passes.
-func (c *core) changeNetwork(now time.Time) action {
+func (c *core) changeNetwork(now time.Time, reason string) action {
 	c.generation++
 	c.failures = 0
+	c.debug("generation %d: %s", c.generation, reason)
 	if !c.state.Pause.IsOn && !c.state.IsPreBlocked {
 		c.state.IsPreBlocked = true
 		c.state.PreBlockSince = now
 		c.addEvent(now, event{Kind: eventPreBlock})
 	}
-	return c.startCheck()
+	return c.startCheck(reason)
 }
 
 // startCheck marks a full check of the current generation as started. A full check during a pre-block does preBlockRounds lookups. Other full checks do steadyRounds lookups.
-func (c *core) startCheck() action {
+func (c *core) startCheck(reason string) action {
 	c.checkGeneration = c.generation
 	rounds := steadyRounds
 	if c.state.IsPreBlocked {
 		rounds = preBlockRounds
 	}
-	return action{Kind: actionFullCheck, Generation: c.generation, Rounds: rounds}
+	return action{Kind: actionFullCheck, Generation: c.generation, Rounds: rounds, Reason: reason}
 }
 
 // requestCheck starts a full check, if no full check of the current generation runs.
-func (c *core) requestCheck() []action {
+func (c *core) requestCheck(reason string) []action {
 	if c.checkGeneration == c.generation {
+		c.debug("no new full check for %q, because a full check of generation %d runs", reason, c.generation)
 		return nil
 	}
-	return []action{c.startCheck()}
+	return []action{c.startCheck(reason)}
 }
 
 // handleCheck takes the result of a full check. A result of an older generation is not valid, because the network changed.
 func (c *core) handleCheck(now time.Time, generation int, result geocheck.Result, lookupErr error) {
 	now = now.Round(0)
 	if generation != c.generation || c.checkGeneration != generation {
+		c.debug("ignore the full check of generation %d, because the current generation is %d", generation, c.generation)
 		return
 	}
 	c.checkGeneration = 0
 	if lookupErr != nil {
 		c.failures++
-		delay := retryInterval
-		if c.failures >= slowRetryAfter {
-			delay = slowRetryInterval
-		}
+		delay := getRetryDelay(c.failures, c.state.IsPreBlocked)
 		c.nextRetry = now.Add(delay)
+		c.state.LastFailure = checkFailure{Time: now, Error: lookupErr.Error()}
+		c.debug("failed full checks in a row: %d. The next retry is in %v. Pre-block: %v", c.failures, delay, c.state.IsPreBlocked)
 		if !c.state.IsPreBlocked {
 			// The network did not change, and the full check did steadyRounds lookups.
 			c.applyVerdicts(now, c.getVerdicts(geocheck.Result{}, lookupErr))
@@ -173,6 +218,7 @@ func (c *core) handleCheck(now time.Time, generation int, result geocheck.Result
 		return
 	}
 	c.failures = 0
+	c.state.LastFailure = checkFailure{}
 	c.state.LastFullCheck = now
 	c.state.LastResult = result
 	c.state.Country = strings.Join(result.Countries(), " / ")
@@ -192,6 +238,7 @@ func (c *core) handleProbe(now time.Time, generation int, location geocheck.Loca
 	now = now.Round(0)
 	c.isProbeRunning = false
 	if generation != c.generation {
+		c.debug("ignore the probe of generation %d, because the current generation is %d", generation, c.generation)
 		return nil
 	}
 	if probeErr != nil {
@@ -200,13 +247,14 @@ func (c *core) handleProbe(now time.Time, generation int, location geocheck.Loca
 			return nil
 		}
 		c.lastProbeFailureCheck = now
-		return []action{c.startCheck()}
+		return []action{c.startCheck("failed probe")}
 	}
 	if location.IP != "" {
 		if c.state.PublicIP != "" && !isSameNetwork(c.state.PublicIP, location.IP) {
 			// Move the known address at once. Otherwise the next probe sees the same change again and stops the full check.
+			reason := fmt.Sprintf("public address %s -> %s", c.state.PublicIP, location.IP)
 			c.state.PublicIP = location.IP
-			return []action{c.changeNetwork(now)}
+			return []action{c.changeNetwork(now, reason)}
 		}
 		if c.state.PublicIP == "" {
 			c.state.PublicIP = location.IP
@@ -226,12 +274,13 @@ func (c *core) handleProbe(now time.Time, generation int, location geocheck.Loca
 		}
 	}
 	if len(stricterVerdicts) > 0 {
+		c.debug("the probe in %s does not allow %d providers, so the service blocks them at once", location.Country, len(stricterVerdicts))
 		c.applyVerdicts(now, stricterVerdicts)
 	}
 	// After a failed full check, only the retry schedule starts a full check. Otherwise each probe goes around the slow retries.
 	isNewCountry := !hasCountry(c.state.LastResult, location.Country)
 	if (len(stricterVerdicts) > 0 || isNewCountry) && c.failures == 0 {
-		return c.requestCheck()
+		return c.requestCheck("probe in " + location.Country)
 	}
 	return nil
 }
@@ -252,7 +301,7 @@ func (c *core) resume(now time.Time) []action {
 		return nil
 	}
 	c.endPause(now)
-	return []action{c.changeNetwork(now)}
+	return []action{c.changeNetwork(now, "resume")}
 }
 
 // endPause stops the pause. The block of the last verdicts applies again, so it adds a block event for them.

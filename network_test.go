@@ -47,6 +47,8 @@ func TestServiceWithRealNetwork(t *testing.T) {
 	log, _ := os.ReadFile(paths.Log)
 	t.Logf("country: %q, pre-block: %v, blocked: %v", state.Country, state.IsPreBlocked, state.blockedProviders())
 	t.Logf("log:\n%s", log)
+	debugLog, _ := os.ReadFile(paths.DebugLog)
+	t.Logf("verbose log:\n%s", debugLog)
 	if state.LastFullCheck.IsZero() || state.IsPreBlocked {
 		t.Errorf("a full check must pass in 20 seconds: %+v", state)
 	}

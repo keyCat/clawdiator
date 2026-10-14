@@ -229,16 +229,21 @@ func TestLookupFailureWithoutChangeBlocks(t *testing.T) {
 	}
 }
 
-// After a change of the network, a failed full check keeps the pre-block. The retries slow down after 4 failures.
+// After a change of the network, a failed full check keeps the pre-block.
+// The pre-block stops all access, so the first retries come soon. They slow down after 10 failures.
 func TestLookupFailureAfterChangeKeepsPreBlock(t *testing.T) {
 	s := newSimulation(t)
 	check := mustFindCheck(t, s.runUntil(testStart))
-	for failure := 1; failure <= slowRetryAfter; failure++ {
+	wantDelays := []time.Duration{
+		5 * time.Second, 10 * time.Second, 20 * time.Second, 30 * time.Second, 30 * time.Second,
+		30 * time.Second, 30 * time.Second, 30 * time.Second, 30 * time.Second, 5 * time.Minute,
+	}
+	for index, wantDelay := range wantDelays {
+		failure := index + 1
 		failedAt := s.now
 		s.c.handleCheck(failedAt, check.Generation, geocheck.Result{}, errOffline)
-		wantDelay := retryInterval
-		if failure >= slowRetryAfter {
-			wantDelay = slowRetryInterval
+		if s.c.state.LastFailure.Error != "offline" || !s.c.state.LastFailure.Time.Equal(failedAt) {
+			t.Fatalf("failure %d: the state must keep the last failure: %+v", failure, s.c.state.LastFailure)
 		}
 		if !s.c.nextRetry.Equal(failedAt.Add(wantDelay)) {
 			t.Fatalf("failure %d: the next retry = %v, want %v later", failure, s.c.nextRetry, wantDelay)
@@ -255,6 +260,33 @@ func TestLookupFailureAfterChangeKeepsPreBlock(t *testing.T) {
 	}
 	if !s.c.state.IsPreBlocked || slices.Contains(getEventKinds(s.c.state), eventBlock) {
 		t.Errorf("failed checks in a pre-block must keep the pre-block and add no block event: %v", getEventKinds(s.c.state))
+	}
+	s.c.handleCheck(s.now, check.Generation, newResult("DE", "DE", "DE"), nil)
+	if s.c.state.LastFailure.Error != "" || s.c.state.IsPreBlocked {
+		t.Errorf("a passed full check must clear the last failure and end the pre-block: %+v", s.c.state.LastFailure)
+	}
+}
+
+func TestGetRetryDelay(t *testing.T) {
+	cases := []struct {
+		failures     int
+		isPreBlocked bool
+		want         time.Duration
+	}{
+		{1, false, 30 * time.Second},
+		{3, false, 30 * time.Second},
+		{4, false, 5 * time.Minute},
+		{1, true, 5 * time.Second},
+		{2, true, 10 * time.Second},
+		{3, true, 20 * time.Second},
+		{4, true, 30 * time.Second},
+		{9, true, 30 * time.Second},
+		{10, true, 5 * time.Minute},
+	}
+	for _, testCase := range cases {
+		if got := getRetryDelay(testCase.failures, testCase.isPreBlocked); got != testCase.want {
+			t.Errorf("getRetryDelay(%d, %v) = %v, want %v", testCase.failures, testCase.isPreBlocked, got, testCase.want)
+		}
 	}
 }
 

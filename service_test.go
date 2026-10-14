@@ -23,17 +23,21 @@ type fakeCheck struct {
 	ctx     context.Context
 	options geocheck.Options
 	reply   chan geocheck.Result
+	// fail makes the full check fail with the error.
+	fail chan error
 }
 
 func (n *fakeNetwork) lookup(ctx context.Context, options geocheck.Options) (geocheck.Result, error) {
 	if len(options.Services) == 1 && options.MinReplies == 1 {
 		return geocheck.Result{Locations: []geocheck.Location{n.probe}}, nil
 	}
-	check := &fakeCheck{ctx: ctx, options: options, reply: make(chan geocheck.Result, 1)}
+	check := &fakeCheck{ctx: ctx, options: options, reply: make(chan geocheck.Result, 1), fail: make(chan error, 1)}
 	n.checks <- check
 	select {
 	case result := <-check.reply:
 		return result, nil
+	case err := <-check.fail:
+		return geocheck.Result{}, err
 	case <-ctx.Done():
 		return geocheck.Result{}, ctx.Err()
 	}
@@ -76,7 +80,7 @@ func newTestDriver(t *testing.T) *testDriver {
 		td.hostsWrites = append(td.hostsWrites, hosts)
 		return isChanged, nil
 	}
-	td.flushDNS = func() { td.flushes++ }
+	td.flushDNS = func() string { td.flushes++; return "ok" }
 	if err := os.MkdirAll(td.paths.Dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -296,5 +300,95 @@ func TestDriverSavesStateAndLog(t *testing.T) {
 	td.step()
 	if !td.lastSave.After(firstSave) {
 		t.Error("the service must save the heartbeat at least every 30 seconds")
+	}
+}
+
+// The block must be in the hosts file before the check of the new network starts.
+func TestDriverAppliesBlockBeforeCheck(t *testing.T) {
+	td := newTestDriver(t)
+	var order []string
+	writeHosts := td.writeHosts
+	td.writeHosts = func(hosts []string) (bool, error) {
+		order = append(order, "hosts")
+		return writeHosts(hosts)
+	}
+	td.spawn = func(task func()) {
+		order = append(order, "start")
+		go task()
+	}
+	td.step()
+	td.nextCheck()
+	if len(order) < 2 || order[0] != "hosts" {
+		t.Errorf("the pre-block must come before the start of the check: %v", order)
+	}
+}
+
+// A failed full check must write its reason to the log, so that a long pre-block has a visible cause.
+func TestDriverLogsFailedCheck(t *testing.T) {
+	td := newTestDriver(t)
+	td.step()
+	check := td.nextCheck()
+	check.fail <- errors.New("2 of 4 location services replied, but the minimum is 3 (cloudflare: DE; country.is: DE; ipinfo.io: HTTP 429; 2ip.io: timeout)")
+	td.handleResult(td.waitCheckResult())
+	td.afterStep(false)
+	log, _ := os.ReadFile(td.paths.Log)
+	if !strings.Contains(string(log), "all check-failed 2 of 4 location services replied") || !strings.Contains(string(log), "ipinfo.io: HTTP 429") {
+		t.Errorf("the log must have the failed check with the reply of each service:\n%s", log)
+	}
+	if !strings.Contains(td.core.state.LastFailure.Error, "ipinfo.io: HTTP 429") || !td.core.state.IsPreBlocked {
+		t.Errorf("the state must keep the failure and the pre-block: %+v", td.core.state.LastFailure)
+	}
+
+	// A stopped check of an older generation is not a failure.
+	td.fingerprint = "hotel"
+	td.step()
+	old := td.nextCheck()
+	td.fingerprint = "hotel-2"
+	td.step()
+	td.nextCheck()
+	<-old.ctx.Done()
+	td.handleResult(td.waitCheckResult())
+	log, _ = os.ReadFile(td.paths.Log)
+	if strings.Count(string(log), "check-failed") != 1 {
+		t.Errorf("a stopped check must not add a failure to the log:\n%s", log)
+	}
+}
+
+// The verbose log must show each step with its reason, its result and its duration.
+func TestDriverVerboseLog(t *testing.T) {
+	td := newTestDriver(t)
+	td.step()
+	check := td.nextCheck()
+	check.fail <- errors.New("2 of 4 location services replied (ipinfo.io: HTTP 429)")
+	td.handleResult(td.waitCheckResult())
+	td.afterStep(false)
+	td.handleRequest(commandRequest{Command: socketCheck, User: "ivan"})
+	data, err := os.ReadFile(td.paths.DebugLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(data)
+	for _, want := range []string{
+		"2026-10-14T09:00:00.000Z core network fingerprint \"wifi\"",
+		"core generation 1: service start",
+		"check start generation 1, 1 rounds, reason: service start",
+		"hosts blocked providers: Anthropic, OpenAI (41 hosts). The file changed: true",
+		"2026-10-14T09:00:00.000Z all pre-block the network changed",
+		"dns flush: ok",
+		"probe generation 1 in",
+		"country DE",
+		"check generation 1 failed in",
+		"ipinfo.io: HTTP 429",
+		"core failed full checks in a row: 1. The next retry is in 5s. Pre-block: true",
+		"all pre-block the network changed",
+		"command check from user \"ivan\": ok",
+	} {
+		if !strings.Contains(log, want) {
+			t.Errorf("the verbose log must contain %q:\n%s", want, log)
+		}
+	}
+	normal, _ := os.ReadFile(td.paths.Log)
+	if strings.Contains(string(normal), "probe generation") || !strings.Contains(string(normal), "all pre-block") {
+		t.Errorf("the normal log must have only the events and the failed checks:\n%s", normal)
 	}
 }

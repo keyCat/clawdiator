@@ -71,6 +71,12 @@ type providerState struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+// checkFailure is a failed full check. The error names each location service and its failure.
+type checkFailure struct {
+	Time  time.Time `json:"time"`
+	Error string    `json:"error,omitempty"`
+}
+
 // pauseState tells if a pause is on.
 type pauseState struct {
 	IsOn  bool      `json:"is_on"`
@@ -97,6 +103,8 @@ type serviceState struct {
 	LastResult geocheck.Result `json:"last_result"`
 	// PublicIP is the last known public IP address. A change to another network starts a pre-block.
 	PublicIP string `json:"public_ip,omitempty"`
+	// LastFailure is the last failed full check. A passed full check clears it.
+	LastFailure checkFailure `json:"last_failure"`
 	// LastEventSeq is the sequence number of the last event.
 	LastEventSeq int64   `json:"last_event_seq"`
 	Events       []event `json:"events"`

@@ -56,3 +56,17 @@ func TestAppendLogRotates(t *testing.T) {
 		t.Errorf("the old log must be in .1: %v", err)
 	}
 }
+
+func TestAppendLogLimit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "clawdiator-debug.log")
+	for index := 0; index < 3; index++ {
+		if err := appendLogLimit(path, []string{"0123456789"}, 15); err != nil {
+			t.Fatal(err)
+		}
+	}
+	current, _ := os.ReadFile(path)
+	old, _ := os.ReadFile(path + ".1")
+	if string(current) != "0123456789\n" || string(old) != "0123456789\n0123456789\n" {
+		t.Errorf("the log must move to .1 at its own limit: %q, %q", current, old)
+	}
+}

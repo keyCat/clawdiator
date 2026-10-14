@@ -9,15 +9,27 @@ import (
 	"geocheck"
 )
 
-// maxLogSize is the size of the log that starts a new file. The old lines move to clawdiator.log.1.
-const maxLogSize = 1 << 20
+const (
+	// maxLogSize is the size of the log that starts a new file. The old lines move to clawdiator.log.1.
+	maxLogSize = 1 << 20
+	// maxDebugLogSize is the size of the verbose log that starts a new file.
+	// A probe every 30 seconds gives about 350 KB each day, so 1 file keeps about 2 weeks.
+	maxDebugLogSize = 5 << 20
+	// debugTimeFormat has milliseconds, so that the verbose log shows the duration of each step.
+	debugTimeFormat = "2006-01-02T15:04:05.000Z07:00"
+)
 
-// appendLog adds the lines to the log. All users can read the log.
+// appendLog adds the lines to the normal log. All users can read the log.
 func appendLog(path string, lines []string) error {
+	return appendLogLimit(path, lines, maxLogSize)
+}
+
+// appendLogLimit adds the lines to a log. At the size limit, it moves the log to the same name with ".1".
+func appendLogLimit(path string, lines []string, maxSize int64) error {
 	if len(lines) == 0 {
 		return nil
 	}
-	if info, err := os.Stat(path); err == nil && info.Size() >= maxLogSize {
+	if info, err := os.Stat(path); err == nil && info.Size() >= maxSize {
 		if err := os.Rename(path, path+".1"); err != nil {
 			return err
 		}
@@ -30,9 +42,15 @@ func appendLog(path string, lines []string) error {
 	return joinErrors(writeErr, file.Close())
 }
 
-// formatEventLog returns the log lines of the event, in English. A block event gives 1 line for each provider.
+// formatEventLog returns the log lines of the event, in English, with the time format of the normal log.
+// A block event gives 1 line for each provider.
 func formatEventLog(change event) []string {
-	stamp := change.Time.Format(time.RFC3339)
+	return formatEventLogWith(change, time.RFC3339)
+}
+
+// formatEventLogWith returns the log lines of the event with the time format. The verbose log uses milliseconds.
+func formatEventLogWith(change event, timeFormat string) []string {
+	stamp := change.Time.Format(timeFormat)
 	words := map[eventKind]string{eventBlock: "blocked", eventUnblock: "open", eventPauseBlock: "paused-blocked", eventPauseUnblock: "paused-open"}
 	switch change.Kind {
 	case eventBlock, eventUnblock, eventPauseBlock, eventPauseUnblock:
