@@ -10,7 +10,8 @@ import (
 	"time"
 )
 
-// TestServiceWithRealNetwork runs the real service loop for 20 seconds with the real location services.
+// TestServiceWithRealNetwork runs the real service loop for 25 seconds with the real location services.
+// The service also downloads the local database from db-ip.com. Then the test asks for a full check that uses it.
 // All files, also the hosts file, are in a temporary folder, so the test does not change the system.
 // The test sends requests to the location services, so it runs only with CLAWDIATOR_NETWORK_TEST=1.
 func TestServiceWithRealNetwork(t *testing.T) {
@@ -27,12 +28,17 @@ func TestServiceWithRealNetwork(t *testing.T) {
 	if err := os.WriteFile(paths.Hosts, []byte(sampleHosts), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- runService(ctx, paths) }()
 
-	time.Sleep(time.Second)
+	// The check command must come after the download. Only 1 check command in 30 seconds is possible.
+	for start := time.Now(); time.Since(start) < 15*time.Second; time.Sleep(200 * time.Millisecond) {
+		if debugLog, _ := os.ReadFile(paths.DebugLog); strings.Contains(string(debugLog), "dbip the download of") {
+			break
+		}
+	}
 	if response, err := sendCommand(paths.CheckSocket, commandRequest{Command: socketCheck}); err != nil || response.Code != codeOK {
 		t.Errorf("the check socket = %+v, %v", response, err)
 	}
@@ -50,7 +56,13 @@ func TestServiceWithRealNetwork(t *testing.T) {
 	debugLog, _ := os.ReadFile(paths.DebugLog)
 	t.Logf("verbose log:\n%s", debugLog)
 	if state.LastFullCheck.IsZero() || state.IsPreBlocked {
-		t.Errorf("a full check must pass in 20 seconds: %+v", state)
+		t.Errorf("a full check must pass in 25 seconds: %+v", state)
+	}
+	if state.LocalDB.File != getDBFileName(getDBMonth(time.Now())) || !strings.Contains(string(debugLog), "; dbip: ") {
+		t.Errorf("the service must download the local database and use it in the full check: %+v", state.LocalDB)
+	}
+	if files := findDBFiles(paths.Dir); len(files) != 1 {
+		t.Errorf("the app folder must have 1 file of the local database: %v", files)
 	}
 	// A fast network can end the pre-block in 1 second, so the log is the proof of the pre-block.
 	if !strings.Contains(string(log), "all pre-block the network changed") || !strings.Contains(string(log), "all pre-block-end") {

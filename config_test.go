@@ -6,13 +6,14 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"geocheck"
 )
 
 func TestGetGeoOptions(t *testing.T) {
 	options, err := getGeoOptions(&Config{})
-	if err != nil || !slices.Equal(geocheck.ServiceNames(options.Services), geocheck.DefaultServiceNames()) || options.MinReplies != 3 || options.UserAgent != appName {
+	if err != nil || !slices.Equal(geocheck.ServiceNames(options.Services), []string{"cloudflare", "ipwho.is", "geojs.io"}) || options.MinReplies != 2 || options.UserAgent != appName {
 		t.Errorf("the default options = %v, %d, %q, %v", geocheck.ServiceNames(options.Services), options.MinReplies, options.UserAgent, err)
 	}
 	options, err = getGeoOptions(&Config{GeoServices: []string{"ipinfo.io", "ipwho.is"}, GeoMinReplies: 2})
@@ -29,8 +30,11 @@ func TestGetGeoOptions(t *testing.T) {
 			t.Errorf("%+v must give a translated error: %v", cfg, err)
 		}
 	}
+	if options.Timeout != 3*time.Second || options.ExtraWait != time.Second || !slices.Equal(options.WaitFor, []string{probeServiceName}) {
+		t.Errorf("the full check must stop the slow services, but wait for the probe service: %v, %v, %v", options.Timeout, options.ExtraWait, options.WaitFor)
+	}
 	probe := getProbeOptions()
-	if len(probe.Services) != 1 || probe.Services[0].Name != probeServiceName || probe.MinReplies != 1 || probe.Rounds != 1 {
+	if len(probe.Services) != 1 || probe.Services[0].Name != probeServiceName || probe.MinReplies != 1 || probe.Rounds != 1 || probe.Timeout != 3*time.Second {
 		t.Errorf("the probe options = %+v", probe)
 	}
 }

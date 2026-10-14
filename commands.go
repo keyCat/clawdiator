@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -28,10 +29,12 @@ type installer struct {
 	flushDNS   func()
 	// consoleUserID returns the user at the screen. The installation starts the agents in the session of this user.
 	consoleUserID func() int
-	now           func() time.Time
-	user          string
-	stdin         io.Reader
-	stdout        io.Writer
+	// downloadDB downloads the file of the local database for the month into the app folder.
+	downloadDB func(ctx context.Context, month string) (*countryDB, error)
+	now        func() time.Time
+	user       string
+	stdin      io.Reader
+	stdout     io.Writer
 }
 
 func newInstaller(paths appPaths) *installer {
@@ -42,6 +45,7 @@ func newInstaller(paths appPaths) *installer {
 		isRoot:        func() bool { return os.Geteuid() == 0 },
 		flushDNS:      func() { _ = flushDNS() },
 		consoleUserID: getConsoleUserID,
+		downloadDB:    newDBDownloader(paths.Dir),
 		now:           time.Now,
 		user:          getUserName(),
 		stdin:         os.Stdin,
@@ -68,7 +72,7 @@ func (in *installer) commandInstall(args []string) error {
 	}
 	flags := newFlagSet("install")
 	isYes := flags.Bool("yes", false, text(msgFlagYes))
-	geoServices := flags.String("geo-services", "", text(msgFlagGeoServices))
+	geoServices := flags.String("geo-services", "", text(msgFlagGeoServices, strings.Join(geocheck.DefaultServiceNames(), ",")))
 	geoMinReplies := flags.Int("geo-min-replies", 0, text(msgFlagGeoMinReplies))
 	blockedCountries := flags.String("blocked-countries", "", text(msgFlagBlockedCountries))
 	if err := flags.Parse(args); err != nil {
@@ -117,6 +121,7 @@ func (in *installer) commandInstall(args []string) error {
 	if err != nil {
 		return errorf(msgCannotCopyBinary, err)
 	}
+	dbFile, dbErr := in.installCountryDB()
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
@@ -128,6 +133,12 @@ func (in *installer) commandInstall(args []string) error {
 		return errorf(msgCannotRegister, err)
 	}
 	fmt.Fprintln(in.stdout, text(msgInstalled, in.paths.Dir))
+	// Without the file, the service downloads it. So a failed download is a warning, not an error.
+	if dbErr != nil {
+		fmt.Fprintln(in.stdout, text(msgLocalDBNotDownloaded, dbErr))
+	} else {
+		fmt.Fprintln(in.stdout, text(msgLocalDBReady, dbFile))
+	}
 	// Without the agents, the service still blocks. So a failure of the agents is a warning, not an error.
 	if !hasTray {
 		fmt.Fprintln(in.stdout, text(msgTrayMissing, trayBinaryName))
@@ -187,6 +198,25 @@ func (in *installer) installTrayBinary() (bool, error) {
 		return false, err
 	}
 	return true, writeRootFile(in.paths.TrayBinary, data, 0o755)
+}
+
+// installCountryDB downloads the file of the local database into the app folder. The service opens the file at its start,
+// so the download comes before the registration of the service. A correct file of the current month stays,
+// so an install for a change of the settings does not download again. The result is the name of the file in the app folder.
+func (in *installer) installCountryDB() (string, error) {
+	now := in.now()
+	current, _ := loadCountryDB(in.paths.Dir)
+	if current != nil && !isDBDownloadDue(current, now) {
+		return getDBFileName(current.month), nil
+	}
+	fmt.Fprintln(in.stdout, text(msgLocalDBDownload))
+	ctx, cancel := context.WithTimeout(context.Background(), installDBTimeout)
+	defer cancel()
+	db, err := downloadNewestDB(ctx, in.downloadDB, now, current.isUsable(now))
+	if err != nil {
+		return "", err
+	}
+	return getDBFileName(db.month), nil
 }
 
 // commandUninstall removes all changes. It continues after a failed step, so that it also works without the network
@@ -300,6 +330,14 @@ func commandStatus(paths appPaths, args []string, now time.Time, stdout io.Write
 	}
 	if state.LastFailure.Error != "" {
 		fmt.Fprintln(stdout, text(msgStatusLastFailure, formatTime(state.LastFailure.Time), state.LastFailure.Error))
+	}
+	switch db := state.LocalDB; {
+	case db.File == "":
+		fmt.Fprintln(stdout, text(msgStatusLocalDBNone))
+	case now.Sub(db.BuildTime) > maxDBAge:
+		fmt.Fprintln(stdout, text(msgStatusLocalDBOld, db.File, db.BuildTime.Format(time.DateOnly)))
+	default:
+		fmt.Fprintln(stdout, text(msgStatusLocalDB, db.File, db.BuildTime.Format(time.DateOnly)))
 	}
 	blocked := state.blockedProviders()
 	for _, provider := range geocheck.Providers() {

@@ -64,7 +64,20 @@ type simulation struct {
 	now         time.Time
 	fingerprint string
 	probe       geocheck.Location
-	probeErr    error
+	// probeDB is the opinion of the local database in each probe. An empty country means no opinion.
+	probeDB  geocheck.Location
+	probeErr error
+}
+
+// getProbeLocations returns the locations of 1 probe, the same as the driver gives them.
+func (s *simulation) getProbeLocations() []geocheck.Location {
+	if s.probeErr != nil {
+		return nil
+	}
+	if s.probeDB.Country == "" {
+		return []geocheck.Location{s.probe}
+	}
+	return []geocheck.Location{s.probe, s.probeDB}
 }
 
 // newSimulation returns a simulation before its first tick. The first tick is at testStart.
@@ -95,7 +108,7 @@ func (s *simulation) runUntil(end time.Time) []action {
 				checks = append(checks, next)
 				continue
 			}
-			checks = append(checks, s.c.handleProbe(s.now, next.Generation, s.probe, s.probeErr)...)
+			checks = append(checks, s.c.handleProbe(s.now, next.Generation, s.getProbeLocations(), s.probeErr)...)
 		}
 	}
 	return checks
@@ -456,5 +469,42 @@ func TestIsSameNetwork(t *testing.T) {
 		if got := isSameNetwork(testCase.first, testCase.second); got != testCase.want {
 			t.Errorf("isSameNetwork(%q, %q) = %v, want %v", testCase.first, testCase.second, got, testCase.want)
 		}
+	}
+}
+
+// The probe uses the opinion of the local database, the same as the full check. The database gives no region,
+// so the probe uses the region of the last full check for it too.
+func TestProbeUsesLocalDBOpinion(t *testing.T) {
+	s := newSimulation(t)
+	check := mustFindCheck(t, s.runUntil(testStart))
+	s.c.handleCheck(testStart.Add(time.Second), check.Generation, newResult("UA/Kyiv City", "UA"), nil)
+	s.probe = ukraine
+	s.probeDB = geocheck.Location{Country: "UA", Source: dbSource}
+	if checks := s.runUntil(testStart.Add(2 * probeInterval)); len(checks) != 0 || len(s.c.state.blockedProviders()) != 0 {
+		t.Errorf("the database in Kyiv must not block: %v, %v", checks, getEventKinds(s.c.state))
+	}
+	// A new allowed country from the database starts a full check, so that the last result has the country.
+	s.probeDB = geocheck.Location{Country: "PL", Source: dbSource}
+	if checks := s.runUntil(s.now.Add(probeInterval)); len(checks) != 1 || len(s.c.state.blockedProviders()) != 0 {
+		t.Errorf("a new country of the database must start a full check without a block: %v, %v", checks, s.c.state.blockedProviders())
+	}
+	s.c.handleCheck(s.now, s.c.generation, newResult("UA/Kyiv City", "UA", "PL"), nil)
+	s.probeDB = geocheck.Location{Country: "RU", Source: dbSource}
+	checks := s.runUntil(s.now.Add(probeInterval))
+	if len(checks) != 1 || !slices.Equal(s.c.state.blockedProviders(), geocheck.Providers()) {
+		t.Errorf("an opinion of the database in Russia must block at once and start a full check: %v, %v", checks, s.c.state.blockedProviders())
+	}
+}
+
+// The database can give another country than the probe service. Then the probe uses the region of the last full check
+// for the country of the database. Without it, an opinion of Ukraine gives RegionUnknown, and the block starts and stops.
+func TestProbeFillsRegionForLocalDB(t *testing.T) {
+	s := newSimulation(t)
+	check := mustFindCheck(t, s.runUntil(testStart))
+	s.c.handleCheck(testStart.Add(time.Second), check.Generation, newResult("PL", "UA/Kyiv City", "UA"), nil)
+	s.probe = geocheck.Location{Country: "PL", Source: probeServiceName}
+	s.probeDB = geocheck.Location{Country: "UA", Source: dbSource}
+	if checks := s.runUntil(testStart.Add(2 * probeInterval)); len(checks) != 0 || len(s.c.state.blockedProviders()) != 0 {
+		t.Errorf("the opinion of the database in Kyiv must not block: %v, %v", checks, getEventKinds(s.c.state))
 	}
 }

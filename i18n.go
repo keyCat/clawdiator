@@ -134,6 +134,12 @@ const (
 	msgStatusPreBlocked
 	msgStatusCountry
 	msgStatusLastFailure
+	msgLocalDBDownload
+	msgLocalDBReady
+	msgLocalDBNotDownloaded
+	msgStatusLocalDB
+	msgStatusLocalDBOld
+	msgStatusLocalDBNone
 	msgStatusOpen
 	msgStatusBlocked
 	msgStatusHosts
@@ -219,6 +225,8 @@ Commands:
   resume       Stops the pause. Needs sudo.
   hosts        --dry-run shows the change of the hosts file. --remove removes the block without the service.
   help         Shows this help.
+
+The local country database: ` + dbCredit + `, license CC BY 4.0.
 `,
 		`clawdiator блокирует доступ к Anthropic и OpenAI, когда компьютер находится в неподдерживаемой стране.
 Работа над программой не завершена. Сейчас программа работает только на macOS, без меню.
@@ -235,6 +243,8 @@ Commands:
   resume       Завершает паузу. Нужен sudo.
   hosts        --dry-run показывает изменение файла hosts. --remove удаляет блокировку без службы.
   help         Показывает эту справку.
+
+Локальная база стран: ` + dbCredit + `, лицензия CC BY 4.0.
 `,
 	},
 	msgUnknownCommand: {"unknown command %q", "неизвестная команда %q"},
@@ -259,9 +269,10 @@ Commands:
 	msgDryRunFlush:       {"Then the tool would flush the DNS cache with these commands:", "Затем программа очистила бы кэш DNS этими командами:"},
 	msgOnlyMacOS: {"this version works only on macOS. Linux and Windows come in a later version",
 		"эта версия работает только на macOS. Linux и Windows появятся в следующей версии"},
-	msgNeedRoot:          {`the %s command needs administrator rights. Run it with sudo`, `команде %s нужны права администратора. Запустите её через sudo`},
-	msgFlagYes:           {"agree to the consent text without a question", "согласиться с текстом согласия без вопроса"},
-	msgFlagGeoServices:   {"the location services of the full check, separated by commas", "сервисы местоположения для полной проверки через запятую"},
+	msgNeedRoot: {`the %s command needs administrator rights. Run it with sudo`, `команде %s нужны права администратора. Запустите её через sudo`},
+	msgFlagYes:  {"agree to the consent text without a question", "согласиться с текстом согласия без вопроса"},
+	msgFlagGeoServices: {"the location services of the full check, separated by commas. The default is %s",
+		"сервисы местоположения для полной проверки через запятую. По умолчанию %s"},
 	msgFlagGeoMinReplies: {"the minimum number of correct replies of the location services", "минимальное число верных ответов сервисов местоположения"},
 	msgFlagBlockedCountries: {"more country codes to block for both providers, separated by commas, for example AF. An empty value removes them",
 		"дополнительные коды стран для блокировки обоих провайдеров через запятую, например AF. Пустое значение удаляет их"},
@@ -279,6 +290,7 @@ Read what the service does:
      in any program.
   2. Every 30 seconds, it sends a request to Cloudflare. At each full check, it also sends a request
      to the location services. Each service sees your public IP address.
+     Each month, it downloads the country database of DB-IP from db-ip.com.
   3. After each wake from sleep and each change of the network, it blocks the access until the country
      check passes.
   4. An administrator can pause the service, or remove it with "sudo clawdiator uninstall".
@@ -291,6 +303,7 @@ Type "yes" to agree: `,
      ни в одной программе.
   2. Каждые 30 секунд она отправляет запрос в Cloudflare. При каждой полной проверке она также отправляет
      запрос сервисам местоположения. Каждый сервис видит ваш публичный IP-адрес.
+     Каждый месяц она скачивает базу стран DB-IP с сайта db-ip.com.
   3. После каждого выхода из сна и каждой смены сети она блокирует доступ, пока проверка страны
      не пройдёт.
   4. Администратор может поставить службу на паузу или удалить её командой "sudo clawdiator uninstall".
@@ -302,8 +315,13 @@ Type "yes" to agree: `,
 	msgCannotRegister:   {"cannot register the service: %w", "не удалось зарегистрировать службу: %w"},
 	msgInstalled:        {"The service is installed and runs. App folder: %s", "Служба установлена и работает. Папка приложения: %s"},
 	msgLinkCreated:      {"The command is available as %s.", "Команда доступна как %s."},
-	msgLinkNotCreated:   {"The tool did not create the link for the command: %v", "Программа не создала ссылку для команды: %v"},
-	msgLinkIsFile:       {"%s exists and is not a link, so the tool did not replace it", "%s существует и не является ссылкой, поэтому программа не заменила его"},
+	msgLocalDBDownload: {"The tool downloads the local country database from db-ip.com.",
+		"Программа скачивает локальную базу стран с сайта db-ip.com."},
+	msgLocalDBReady: {"The local country database %s is in the app folder.", "Локальная база стран %s находится в папке приложения."},
+	msgLocalDBNotDownloaded: {"CAUTION: the tool did not download the local country database: %v. The service tries again at its start, then every 6 hours.",
+		"ВНИМАНИЕ: программа не скачала локальную базу стран: %v. Служба попробует снова при запуске, затем каждые 6 часов."},
+	msgLinkNotCreated: {"The tool did not create the link for the command: %v", "Программа не создала ссылку для команды: %v"},
+	msgLinkIsFile:     {"%s exists and is not a link, so the tool did not replace it", "%s существует и не является ссылкой, поэтому программа не заменила его"},
 	msgBlockedCountriesActive: {"CAUTION: blocked_countries has %s. The service blocks the providers in these countries.",
 		"ВНИМАНИЕ: в blocked_countries есть %s. Служба блокирует провайдеров в этих странах."},
 	msgHintStatus:        {`Run "clawdiator status" to see the state.`, `Выполните "clawdiator status", чтобы увидеть состояние.`},
@@ -334,10 +352,16 @@ Type "yes" to agree: `,
 		"Предварительная блокировка: с %s. Сеть изменилась, а полная проверка ещё не прошла."},
 	msgStatusCountry:     {"Country: %s (last full check at %s)", "Страна: %s (последняя полная проверка в %s)"},
 	msgStatusLastFailure: {"The last full check failed at %s: %s", "Последняя полная проверка не прошла в %s: %s"},
-	msgStatusOpen:        {"open", "открыт"},
-	msgStatusBlocked:     {"BLOCKED", "ЗАБЛОКИРОВАН"},
-	msgStatusHosts:       {"Hosts file %s: %d hosts are blocked.", "Файл hosts %s: заблокировано хостов: %d."},
-	msgStatusLog:         {"Last lines of %s:", "Последние строки %s:"},
+	msgStatusLocalDB: {"Local database: %s, built %s. " + dbCredit + ".",
+		"Локальная база: %s, создана %s. " + dbCredit + "."},
+	msgStatusLocalDBOld: {"Local database: %s, built %s. It is older than 60 days, so the checks do not use it.",
+		"Локальная база: %s, создана %s. Она старше 60 дней, поэтому проверки её не используют."},
+	msgStatusLocalDBNone: {"Local database: none. The checks use only the online services.",
+		"Локальная база: нет. Проверки используют только онлайн-сервисы."},
+	msgStatusOpen:    {"open", "открыт"},
+	msgStatusBlocked: {"BLOCKED", "ЗАБЛОКИРОВАН"},
+	msgStatusHosts:   {"Hosts file %s: %d hosts are blocked.", "Файл hosts %s: заблокировано хостов: %d."},
+	msgStatusLog:     {"Last lines of %s:", "Последние строки %s:"},
 	msgFlagVerbose: {"show the end of the verbose log instead of the normal log",
 		"показать конец подробного журнала вместо обычного журнала"},
 	msgFlagLines: {"the number of log lines. The default is 10, or 50 with --verbose",

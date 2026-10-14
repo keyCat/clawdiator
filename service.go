@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -29,9 +30,12 @@ const (
 // The duration goes to the verbose log.
 type probeDone struct {
 	Generation int
-	Location   geocheck.Location
-	Err        error
-	Duration   time.Duration
+	// Locations holds the reply of the probe service first. Then it holds the opinion of the local database, if it has one.
+	Locations []geocheck.Location
+	Err       error
+	// DBErr tells why the local database gave no opinion. The probe does not fail for it.
+	DBErr    error
+	Duration time.Duration
 }
 
 type checkDone struct {
@@ -39,10 +43,26 @@ type checkDone struct {
 	Result     geocheck.Result
 	Err        error
 	Duration   time.Duration
+	// FirstErr is the error of the first lookup, if the check asked the services again without the local database.
+	FirstErr error
+}
+
+// dbBlockDone carries the opinion of the local database during a full check. The rules do not allow its country.
+type dbBlockDone struct {
+	Generation int
+	Location   geocheck.Location
+}
+
+// dbDone is the result of a download of the local database.
+type dbDone struct {
+	Month    string
+	DB       *countryDB
+	Err      error
+	Duration time.Duration
 }
 
 // serviceDriver connects the core to the system. Only the goroutine of run calls its methods,
-// except the goroutines of the probes and the full checks. These send their results over the results channel.
+// except the goroutines of the probes, the full checks and the downloads. These send their results over the results channel.
 type serviceDriver struct {
 	core  *core
 	paths appPaths
@@ -57,6 +77,8 @@ type serviceDriver struct {
 	flushDNS func() string
 	// spawn starts a goroutine. The tests replace it to see the order of the steps.
 	spawn func(task func())
+	// downloadDB downloads the file of the local database for the month, checks it and saves it.
+	downloadDB func(ctx context.Context, month string) (*countryDB, error)
 
 	ctx         context.Context
 	results     chan any
@@ -70,6 +92,11 @@ type serviceDriver struct {
 	savedSeq      int64
 	loggedSeq     int64
 	lastUserCheck time.Time
+
+	// countryDB is the local database. It is nil if the service has no correct file.
+	countryDB           *countryDB
+	isDBDownloadRunning bool
+	lastDBDownload      time.Time
 }
 
 // newServiceDriver returns a driver that uses the real system. The tests replace the functions.
@@ -90,6 +117,7 @@ func newServiceDriver(ctx context.Context, c *core, paths appPaths, checkOptions
 		savedSeq:       c.state.LastEventSeq,
 		loggedSeq:      c.state.LastEventSeq,
 	}
+	driver.downloadDB = newDBDownloader(paths.Dir)
 	c.debugf = func(format string, args ...any) { driver.debugf("core", format, args...) }
 	return driver
 }
@@ -129,6 +157,42 @@ func (d *serviceDriver) run(ticks <-chan time.Time, networkChanges <-chan struct
 
 func (d *serviceDriver) handleTick() {
 	d.startActions(d.core.tick(d.now(), d.getFingerprint()))
+	d.startDBDownload()
+}
+
+// startDBDownload starts a download of the local database, if the service has no file of the current month.
+// After a failure, it waits dbRetryInterval. For example, DB-IP can publish the file of the month some hours after its start.
+func (d *serviceDriver) startDBDownload() {
+	// The wall clock also counts the sleep of the computer. The monotonic clock stops during the sleep.
+	now := d.now().Round(0)
+	if d.isDBDownloadRunning || !isDBDownloadDue(d.countryDB, now) || (!d.lastDBDownload.IsZero() && now.Sub(d.lastDBDownload) < dbRetryInterval) {
+		return
+	}
+	d.isDBDownloadRunning, d.lastDBDownload = true, now
+	month, hasUsableFile := getDBMonth(now), d.countryDB.isUsable(now)
+	d.debugf("dbip", "download the file of %s. The current file: %s", month, d.countryDB.describe())
+	d.spawn(func() {
+		start := time.Now()
+		db, err := downloadNewestDB(d.ctx, d.downloadDB, now, hasUsableFile)
+		d.sendResult(dbDone{Month: month, DB: db, Err: err, Duration: time.Since(start)})
+	})
+}
+
+// setCountryDB starts to use the local database. The status command shows it.
+func (d *serviceDriver) setCountryDB(db *countryDB) {
+	d.countryDB = db
+	d.core.state.LocalDB = localDBState{}
+	if db != nil {
+		d.core.state.LocalDB = localDBState{File: getDBFileName(db.month), BuildTime: db.buildTime}
+	}
+}
+
+// getUsableDB returns the local database, or nil if the data is too old.
+func (d *serviceDriver) getUsableDB(now time.Time) *countryDB {
+	if !d.countryDB.isUsable(now) {
+		return nil
+	}
+	return d.countryDB
 }
 
 func (d *serviceDriver) handleResult(result any) {
@@ -138,10 +202,17 @@ func (d *serviceDriver) handleResult(result any) {
 		if done.Err != nil {
 			d.debugf("probe", "generation %d failed in %v: %v", done.Generation, done.Duration.Round(time.Millisecond), done.Err)
 		} else {
-			d.debugf("probe", "generation %d in %v: country %s, address %s", done.Generation, done.Duration.Round(time.Millisecond), done.Location.Country, done.Location.IP)
+			d.debugf("probe", "generation %d in %v: %s, address %s", done.Generation, done.Duration.Round(time.Millisecond),
+				geocheck.Result{Locations: done.Locations}.Describe(), done.Locations[0].IP)
 		}
-		d.startActions(d.core.handleProbe(now, done.Generation, done.Location, done.Err))
+		if done.DBErr != nil {
+			d.debugf("probe", "generation %d: the local database gave no country: %v", done.Generation, done.DBErr)
+		}
+		d.startActions(d.core.handleProbe(now, done.Generation, done.Locations, done.Err))
 	case checkDone:
+		if done.FirstErr != nil {
+			d.debugf("check", "generation %d: the local database gave no country, so the check asked the services again with the full minimum: %v", done.Generation, done.FirstErr)
+		}
 		if done.Err != nil {
 			d.debugf("check", "generation %d failed in %v: %v", done.Generation, done.Duration.Round(time.Millisecond), done.Err)
 		} else {
@@ -153,6 +224,18 @@ func (d *serviceDriver) handleResult(result any) {
 			_ = appendLog(d.paths.Log, []string{now.Round(0).Format(time.RFC3339) + " all check-failed " + cleanLogText(done.Err.Error())})
 		}
 		d.core.handleCheck(now, done.Generation, done.Result, done.Err)
+	case dbDone:
+		d.isDBDownloadRunning = false
+		if done.Err != nil {
+			d.debugf("dbip", "the download of %s failed in %v: %v. The next try is in %v", done.Month, done.Duration.Round(time.Millisecond), done.Err, dbRetryInterval)
+			return
+		}
+		d.setCountryDB(done.DB)
+		d.debugf("dbip", "the download passed in %v: %s", done.Duration.Round(time.Millisecond), done.DB.describe())
+	case dbBlockDone:
+		d.debugf("check", "generation %d: the local database gives %s for %s. The rules do not allow it, so the service blocks at once and waits for all services",
+			done.Generation, done.Location.Country, done.Location.IP)
+		d.core.handleDBBlock(now, done.Generation, done.Location)
 	}
 }
 
@@ -197,41 +280,129 @@ func (d *serviceDriver) startActions(actions []action) {
 	if len(actions) == 0 {
 		return
 	}
-	d.applyBlock(d.now())
+	now := d.now()
+	d.applyBlock(now)
+	db, blockedCountries := d.getUsableDB(now), d.core.blockedCountries
 	for _, next := range actions {
 		switch next.Kind {
 		case actionProbe:
 			generation := next.Generation
-			d.spawn(func() { d.runProbe(generation) })
+			d.spawn(func() { d.runProbe(generation, db) })
 		case actionFullCheck:
 			if d.cancelCheck != nil {
 				d.cancelCheck()
 			}
 			ctx, cancel := context.WithCancel(d.ctx)
 			d.cancelCheck = cancel
-			d.debugf("check", "start generation %d, %d rounds, reason: %s", next.Generation, next.Rounds, next.Reason)
+			dbText := "none"
+			if db != nil {
+				dbText = db.describe()
+			} else if d.countryDB != nil {
+				dbText = d.countryDB.describe() + ", too old"
+			}
+			d.debugf("check", "start generation %d, %d rounds, reason: %s, local database: %s", next.Generation, next.Rounds, next.Reason, dbText)
 			check := next
-			d.spawn(func() { d.runCheck(ctx, check) })
+			d.spawn(func() { d.runCheck(ctx, check, db, blockedCountries) })
 		}
 	}
 }
 
-func (d *serviceDriver) runProbe(generation int) {
+// runProbe asks the probe service. The local database adds its opinion about the address of the reply.
+// The probe uses the database the same way as the full check. Otherwise the probe and the full check can disagree,
+// and the block starts and stops every 30 seconds.
+func (d *serviceDriver) runProbe(generation int, db *countryDB) {
 	start := time.Now()
 	result, err := d.lookup(d.ctx, getProbeOptions())
-	done := probeDone{Generation: generation, Err: err, Duration: time.Since(start)}
-	if err == nil && len(result.Locations) > 0 {
-		done.Location = result.Locations[0]
+	done := probeDone{Generation: generation, Err: err}
+	if err == nil && len(result.Locations) == 0 {
+		done.Err = errors.New("the probe service gave no reply")
 	}
+	if done.Err == nil {
+		location := result.Locations[0]
+		done.Locations = []geocheck.Location{location}
+		if db != nil {
+			// With 1 online reply and a minimum of 1, addDBLocations cannot fail. A missing opinion is in the failures.
+			withDB, _ := addDBLocations(geocheck.Result{Locations: done.Locations}, db, 1)
+			done.Locations = withDB.Locations
+			if len(withDB.Failures) > 0 {
+				done.DBErr = errors.New(strings.Join(withDB.Failures, "; "))
+			}
+		}
+	}
+	done.Duration = time.Since(start)
 	d.sendResult(done)
 }
 
-func (d *serviceDriver) runCheck(ctx context.Context, next action) {
+// runCheck asks the services of the full check. With the local database, the online services must give 1 reply less.
+// The database can give no opinion, for example if cloudflare fails. Then the first lookup can stop a slow service
+// that the full minimum needs. So the check asks the services again with the full minimum.
+func (d *serviceDriver) runCheck(ctx context.Context, next action, db *countryDB, blockedCountries []string) {
 	options := d.checkOptions
 	options.Rounds = next.Rounds
+	options.OnReply = d.newReplyHook(next.Generation, db, blockedCountries)
+	if db != nil {
+		options.MinReplies = max(1, options.MinReplies-1)
+	}
 	start := time.Now()
-	result, err := d.lookup(ctx, options)
-	d.sendResult(checkDone{Generation: next.Generation, Result: result, Err: err, Duration: time.Since(start)})
+	done := checkDone{Generation: next.Generation}
+	done.Result, done.Err = d.lookup(ctx, options)
+	if done.Err == nil {
+		done.Result, done.Err = addDBLocations(done.Result, db, d.checkOptions.MinReplies)
+		if done.Err != nil {
+			done.FirstErr = done.Err
+			options.MinReplies = d.checkOptions.MinReplies
+			done.Result, done.Err = d.lookup(ctx, options)
+			if done.Err == nil {
+				done.Result, done.Err = addDBLocations(done.Result, db, d.checkOptions.MinReplies)
+			}
+		}
+	}
+	done.Duration = time.Since(start)
+	d.sendResult(done)
+}
+
+// newReplyHook returns the OnReply function of a full check. It runs for each reply when the reply comes.
+// The local database looks up the address of the reply at once. If the rules do not allow the country of the database,
+// the service blocks at once. The full check then waits for all services, and the strict rule applies to all replies.
+// The full check also waits for all services if a reply is not allowed. A slow service can give the region of a country
+// with excluded regions, for example Ukraine. In the other cases, the extra wait stops the slow services.
+func (d *serviceDriver) newReplyHook(generation int, db *countryDB, blockedCountries []string) func(geocheck.Location) bool {
+	var addresses []string
+	return func(location geocheck.Location) bool {
+		locations := []geocheck.Location{location}
+		if db != nil && location.IP != "" && !slices.Contains(addresses, location.IP) {
+			addresses = append(addresses, location.IP)
+			if country, err := db.lookupCountry(location.IP); err == nil {
+				opinion := geocheck.Location{Country: country, IP: location.IP, Source: dbSource}
+				locations = append(locations, opinion)
+				if isCountryNotAllowed(opinion, blockedCountries) {
+					d.sendResult(dbBlockDone{Generation: generation, Location: opinion})
+				}
+			}
+		}
+		return slices.ContainsFunc(locations, func(next geocheck.Location) bool { return !isLocationAllowed(next, blockedCountries) })
+	}
+}
+
+// isCountryNotAllowed tells if the rules do not allow the country for a provider. It does not use the region.
+func isCountryNotAllowed(location geocheck.Location, blockedCountries []string) bool {
+	for _, provider := range geocheck.Providers() {
+		switch geocheck.CheckLocation(provider, location, blockedCountries).Kind {
+		case geocheck.NotSupported, geocheck.Blocked:
+			return true
+		}
+	}
+	return false
+}
+
+// isLocationAllowed tells if the rules allow the location for all providers. A country with excluded regions needs the region.
+func isLocationAllowed(location geocheck.Location, blockedCountries []string) bool {
+	for _, provider := range geocheck.Providers() {
+		if !geocheck.CheckLocation(provider, location, blockedCountries).Allowed() {
+			return false
+		}
+	}
+	return true
 }
 
 // sendResult gives the result to the loop. After the end of the service, nobody reads the channel, so the goroutine stops.
@@ -357,8 +528,13 @@ func runService(ctx context.Context, paths appPaths) error {
 	}
 	c := newCore(state, cfg.BlockedCountries)
 	driver := newServiceDriver(ctx, c, paths, checkOptions)
-	driver.debugf("service", "start: process %d, services %s, minimum replies %d, blocked countries %v, last event %d",
-		os.Getpid(), strings.Join(geocheck.ServiceNames(checkOptions.Services), ","), checkOptions.MinReplies, cfg.BlockedCountries, state.LastEventSeq)
+	db, dbErr := loadCountryDB(paths.Dir)
+	driver.setCountryDB(db)
+	driver.debugf("service", "start: process %d, services %s, minimum replies %d, blocked countries %v, last event %d, local database %s",
+		os.Getpid(), strings.Join(geocheck.ServiceNames(checkOptions.Services), ","), checkOptions.MinReplies, cfg.BlockedCountries, state.LastEventSeq, db.describe())
+	if dbErr != nil {
+		driver.debugf("dbip", "cannot open a file: %v", dbErr)
+	}
 	for _, message := range startErrors {
 		driver.debugf("service", "%s", message)
 		c.addError(time.Now(), message)

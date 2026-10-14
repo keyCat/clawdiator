@@ -12,11 +12,11 @@ import (
 )
 
 // consentVersion is the version of the consent text. Increase it when the text changes. Then install asks again.
-const consentVersion = 1
+const consentVersion = 2
 
 // Config is the content of config.json.
 type Config struct {
-	// GeoServices holds the names of the location services of the full check. An empty list means the default services.
+	// GeoServices holds the names of the location services of the full check. An empty list means the default services of geocheck.
 	GeoServices []string `json:"geo_services,omitempty"`
 	// GeoMinReplies is the minimum number of correct replies. 0 means the default value.
 	GeoMinReplies int `json:"geo_min_replies,omitempty"`
@@ -87,13 +87,16 @@ func getGeoOptions(cfg *Config) (geocheck.Options, error) {
 	if minReplies < 1 || minReplies > len(services) {
 		return geocheck.Options{}, errorf(msgMinRepliesInvalid, len(services))
 	}
-	return geocheck.Options{Services: addProbeService(services), MinReplies: minReplies, UserAgent: appName}, nil
+	return geocheck.Options{
+		Services: addProbeService(services), MinReplies: minReplies, UserAgent: appName,
+		Timeout: lookupTimeout, ExtraWait: lookupExtraWait, WaitFor: []string{probeServiceName},
+	}, nil
 }
 
 // getProbeOptions returns the options of the probe: 1 request to the probe service, without a retry.
 func getProbeOptions() geocheck.Options {
 	services, _ := geocheck.FindServices([]string{probeServiceName})
-	return geocheck.Options{Services: services, MinReplies: 1, Rounds: 1, UserAgent: appName}
+	return geocheck.Options{Services: services, MinReplies: 1, Rounds: 1, UserAgent: appName, Timeout: lookupTimeout}
 }
 
 func isCountryCode(code string) bool {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -20,6 +21,8 @@ type fakeManager struct {
 	agentUninstalls      int
 	hasTray              bool
 	agentUserID          int
+	// onInstall runs at the registration of the service, so a test can see the files at the start of the service.
+	onInstall func()
 }
 
 func (m *fakeManager) InstallAgents(_ appPaths, hasTray bool, userID int) error {
@@ -35,6 +38,9 @@ func (m *fakeManager) UninstallAgents(appPaths, int) error {
 
 func (m *fakeManager) Install(appPaths) error {
 	m.installs++
+	if m.onInstall != nil {
+		m.onInstall()
+	}
 	return nil
 }
 
@@ -72,10 +78,12 @@ func newTestInstaller(t *testing.T, answer string) (*installer, *fakeManager, *b
 		isRoot:        func() bool { return true },
 		flushDNS:      func() {},
 		consoleUserID: func() int { return 501 },
-		now:           func() time.Time { return testStart },
-		user:          "ivan",
-		stdin:         strings.NewReader(answer),
-		stdout:        &stdout,
+		// The tests never use the network. A test of the local database replaces this function.
+		downloadDB: func(context.Context, string) (*countryDB, error) { return nil, errOffline },
+		now:        func() time.Time { return testStart },
+		user:       "ivan",
+		stdin:      strings.NewReader(answer),
+		stdout:     &stdout,
 	}
 	return in, manager, &stdout
 }
@@ -219,6 +227,93 @@ func TestCommandStatus(t *testing.T) {
 	stdout.Reset()
 	if err := commandStatus(in.paths, nil, testStart.Add(time.Hour), &stdout); err != nil || !strings.Contains(stdout.String(), "the service does not work") {
 		t.Errorf("an old heartbeat must show that the service does not work: %v\n%s", err, stdout.String())
+	}
+	if !strings.Contains(output, "Local database: none. The checks use only the online services.") {
+		t.Errorf("the status must tell that the service has no local database:\n%s", output)
+	}
+}
+
+func TestCommandStatusLocalDB(t *testing.T) {
+	in, _, _ := newTestInstaller(t, "")
+	built := time.Date(2026, 10, 1, 1, 36, 0, 0, time.UTC)
+	state := &serviceState{Heartbeat: testStart, LocalDB: localDBState{File: "dbip-country-lite-2026-10.mmdb", BuildTime: built}}
+	if err := saveServiceState(in.paths.State, state); err != nil {
+		t.Fatal(err)
+	}
+	for now, want := range map[time.Time]string{
+		testStart:                       "Local database: dbip-country-lite-2026-10.mmdb, built 2026-10-01. IP Geolocation by DB-IP (https://db-ip.com).",
+		built.Add(maxDBAge + time.Hour): "Local database: dbip-country-lite-2026-10.mmdb, built 2026-10-01. It is older than 60 days, so the checks do not use it.",
+	} {
+		var stdout bytes.Buffer
+		if err := commandStatus(in.paths, nil, now, &stdout); err != nil || !strings.Contains(stdout.String(), want) {
+			t.Errorf("the status at %v must contain %q: %v\n%s", now, want, err, stdout.String())
+		}
+	}
+}
+
+// The install downloads the file of the local database before the start of the service.
+func TestInstallDownloadsLocalDB(t *testing.T) {
+	in, manager, stdout := newTestInstaller(t, "yes\n")
+	var months, filesAtStart []string
+	data := newTestDBData(t, dbType, testStart, testDBCountries)
+	in.downloadDB = func(_ context.Context, month string) (*countryDB, error) {
+		months = append(months, month)
+		if err := saveDBFile(filepath.Join(in.paths.Dir, getDBFileName(month)), data); err != nil {
+			return nil, err
+		}
+		return openCountryDB(data, month)
+	}
+	manager.onInstall = func() { filesAtStart = findDBFiles(in.paths.Dir) }
+	if err := in.commandInstall(nil); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{filepath.Join(in.paths.Dir, "dbip-country-lite-2026-10.mmdb")}; !slices.Equal(filesAtStart, want) || !slices.Equal(months, []string{"2026-10"}) {
+		t.Errorf("the file must be in the app folder before the start of the service: %v, %v", filesAtStart, months)
+	}
+	for _, want := range []string{"The tool downloads the local country database from db-ip.com.", "The local country database dbip-country-lite-2026-10.mmdb is in the app folder."} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("the install must show %q:\n%s", want, stdout.String())
+		}
+	}
+
+	// A second install for a change of the settings keeps the file of the current month.
+	stdout.Reset()
+	if err := in.commandInstall([]string{"--blocked-countries", "AF"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(months) != 1 || strings.Contains(stdout.String(), "downloads") || !strings.Contains(stdout.String(), "dbip-country-lite-2026-10.mmdb is in the app folder") {
+		t.Errorf("the install must not download the file of the current month again: %v\n%s", months, stdout.String())
+	}
+
+	// On the first day of a month, DB-IP can have no file of the month yet. Then the install takes the file of the month before.
+	if err := os.Remove(filesAtStart[0]); err != nil {
+		t.Fatal(err)
+	}
+	in.now = func() time.Time { return time.Date(2026, 11, 1, 3, 0, 0, 0, time.UTC) }
+	months, filesAtStart = nil, nil
+	notPublished := in.downloadDB
+	in.downloadDB = func(ctx context.Context, month string) (*countryDB, error) {
+		if month == "2026-11" {
+			months = append(months, month)
+			return nil, errDBNotPublished
+		}
+		return notPublished(ctx, month)
+	}
+	if err := in.commandInstall(nil); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(months, []string{"2026-11", "2026-10"}) || len(filesAtStart) != 1 || getMonthOfFile(filesAtStart[0]) != "2026-10" {
+		t.Errorf("the install must take the file of the month before: %v, %v", months, filesAtStart)
+	}
+
+	// A failed download gives a caution. The install does not stop, and the service tries again.
+	if err := os.Remove(filesAtStart[0]); err != nil {
+		t.Fatal(err)
+	}
+	in.downloadDB = func(context.Context, string) (*countryDB, error) { return nil, errOffline }
+	stdout.Reset()
+	if err := in.commandInstall(nil); err != nil || !strings.Contains(stdout.String(), "CAUTION: the tool did not download the local country database: offline") || manager.installs != 4 {
+		t.Errorf("a failed download must give a caution: %v\n%s", err, stdout.String())
 	}
 }
 

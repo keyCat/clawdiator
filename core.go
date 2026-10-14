@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/netip"
 	"slices"
@@ -234,12 +235,16 @@ func (c *core) handleCheck(now time.Time, generation int, result geocheck.Result
 }
 
 // handleProbe takes the result of a probe. The probe can make the result stricter, but it cannot remove a block.
-func (c *core) handleProbe(now time.Time, generation int, location geocheck.Location, probeErr error) []action {
+// The first location is the reply of the probe service. The next location is the opinion of the local database, if it has one.
+func (c *core) handleProbe(now time.Time, generation int, locations []geocheck.Location, probeErr error) []action {
 	now = now.Round(0)
 	c.isProbeRunning = false
 	if generation != c.generation {
 		c.debug("ignore the probe of generation %d, because the current generation is %d", generation, c.generation)
 		return nil
+	}
+	if probeErr == nil && len(locations) == 0 {
+		probeErr = errors.New("the probe has no reply")
 	}
 	if probeErr != nil {
 		// A failed probe is not a change of the network, and it does not block. Only a failed full check blocks.
@@ -249,40 +254,71 @@ func (c *core) handleProbe(now time.Time, generation int, location geocheck.Loca
 		c.lastProbeFailureCheck = now
 		return []action{c.startCheck("failed probe")}
 	}
-	if location.IP != "" {
-		if c.state.PublicIP != "" && !isSameNetwork(c.state.PublicIP, location.IP) {
+	if ip := locations[0].IP; ip != "" {
+		if c.state.PublicIP != "" && !isSameNetwork(c.state.PublicIP, ip) {
 			// Move the known address at once. Otherwise the next probe sees the same change again and stops the full check.
-			reason := fmt.Sprintf("public address %s -> %s", c.state.PublicIP, location.IP)
-			c.state.PublicIP = location.IP
+			reason := fmt.Sprintf("public address %s -> %s", c.state.PublicIP, ip)
+			c.state.PublicIP = ip
 			return []action{c.changeNetwork(now, reason)}
 		}
 		if c.state.PublicIP == "" {
-			c.state.PublicIP = location.IP
+			c.state.PublicIP = ip
 		}
 	}
-	// The trace has no region. The probe uses the region that the last full check gives for the same country.
-	// Without it, each probe in Ukraine gives RegionUnknown and blocks again.
-	if location.Region == "" {
-		location.Region = c.state.LastResult.Region(location.Country)
+	// The trace and the local database give no region. The probe uses the region that the last full check gives
+	// for the same country. Without it, each probe in Ukraine gives RegionUnknown and blocks again.
+	probeResult := geocheck.Result{Locations: slices.Clone(locations)}
+	isNewCountry := false
+	for index, location := range probeResult.Locations {
+		if location.Region == "" {
+			probeResult.Locations[index].Region = c.state.LastResult.Region(location.Country)
+		}
+		isNewCountry = isNewCountry || !hasCountry(c.state.LastResult, location.Country)
 	}
-	probeResult := geocheck.Result{Locations: []geocheck.Location{location}}
+	countries := strings.Join(probeResult.Countries(), " / ")
+	stricterVerdicts := c.getStricterVerdicts(probeResult)
+	if len(stricterVerdicts) > 0 {
+		c.debug("the probe in %s does not allow %d providers, so the service blocks them at once", countries, len(stricterVerdicts))
+		c.applyVerdicts(now, stricterVerdicts)
+	}
+	// After a failed full check, only the retry schedule starts a full check. Otherwise each probe goes around the slow retries.
+	if (len(stricterVerdicts) > 0 || isNewCountry) && c.failures == 0 {
+		return c.requestCheck("probe in " + countries)
+	}
+	return nil
+}
+
+// handleDBBlock takes the opinion of the local database during a full check. The rules do not allow its country,
+// so the service blocks at once. The result of the full check comes later and applies the strict rule to all replies.
+// The opinion can only add a block. A country without a region never blocks here, because the database gives no region.
+func (c *core) handleDBBlock(now time.Time, generation int, location geocheck.Location) {
+	now = now.Round(0)
+	if generation != c.generation || c.checkGeneration != generation {
+		c.debug("ignore the opinion of the local database of generation %d, because the current generation is %d", generation, c.generation)
+		return
+	}
+	stricterVerdicts := c.getStricterVerdicts(geocheck.Result{Locations: []geocheck.Location{location}})
+	for provider, verdict := range stricterVerdicts {
+		if verdict.Kind != geocheck.NotSupported && verdict.Kind != geocheck.Blocked {
+			delete(stricterVerdicts, provider)
+		}
+	}
+	if len(stricterVerdicts) > 0 {
+		c.debug("the local database gives %s during the full check, so the service blocks %d providers at once", location.Country, len(stricterVerdicts))
+		c.applyVerdicts(now, stricterVerdicts)
+	}
+}
+
+// getStricterVerdicts returns the verdicts that do not allow a provider that is not blocked now.
+func (c *core) getStricterVerdicts(result geocheck.Result) map[geocheck.Provider]geocheck.Verdict {
 	stricterVerdicts := map[geocheck.Provider]geocheck.Verdict{}
 	for _, provider := range geocheck.Providers() {
-		verdict := geocheck.Check(provider, probeResult, nil, c.blockedCountries)
+		verdict := geocheck.Check(provider, result, nil, c.blockedCountries)
 		if !verdict.Allowed() && !c.state.provider(provider).IsBlocked {
 			stricterVerdicts[provider] = verdict
 		}
 	}
-	if len(stricterVerdicts) > 0 {
-		c.debug("the probe in %s does not allow %d providers, so the service blocks them at once", location.Country, len(stricterVerdicts))
-		c.applyVerdicts(now, stricterVerdicts)
-	}
-	// After a failed full check, only the retry schedule starts a full check. Otherwise each probe goes around the slow retries.
-	isNewCountry := !hasCountry(c.state.LastResult, location.Country)
-	if (len(stricterVerdicts) > 0 || isNewCountry) && c.failures == 0 {
-		return c.requestCheck("probe in " + location.Country)
-	}
-	return nil
+	return stricterVerdicts
 }
 
 // pause starts a pause. A zero until means a pause with no end. The pause removes the block at once.

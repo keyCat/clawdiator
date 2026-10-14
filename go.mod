@@ -1,15 +1,18 @@
 module clawdiator
 
-go 1.23.0
+go 1.26.0
 
 require (
 	fyne.io/systray v1.12.2
 	geocheck v0.0.0
+	github.com/oschwald/maxminddb-golang/v2 v2.8.0
 )
 
 require (
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
-	golang.org/x/sys v0.15.0 // indirect
+	github.com/maxmind/mmdbwriter v1.2.0 // indirect
+	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
+	golang.org/x/sys v0.48.0 // indirect
 )
 
 replace geocheck => ../warm-sloppy-welcome/geocheck

@@ -77,6 +77,12 @@ type checkFailure struct {
 	Error string    `json:"error,omitempty"`
 }
 
+// localDBState is the file of the local database. An empty File means that the service has no correct file.
+type localDBState struct {
+	File      string    `json:"file,omitempty"`
+	BuildTime time.Time `json:"build_time,omitzero"`
+}
+
 // pauseState tells if a pause is on.
 type pauseState struct {
 	IsOn  bool      `json:"is_on"`
@@ -105,6 +111,8 @@ type serviceState struct {
 	PublicIP string `json:"public_ip,omitempty"`
 	// LastFailure is the last failed full check. A passed full check clears it.
 	LastFailure checkFailure `json:"last_failure"`
+	// LocalDB is the file of the local database that the service uses. The status command shows it.
+	LocalDB localDBState `json:"local_db,omitzero"`
 	// LastEventSeq is the sequence number of the last event.
 	LastEventSeq int64   `json:"last_event_seq"`
 	Events       []event `json:"events"`
