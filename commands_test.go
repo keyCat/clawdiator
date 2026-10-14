@@ -16,6 +16,21 @@ import (
 type fakeManager struct {
 	installs, uninstalls int
 	uninstallErr         error
+	agentInstalls        int
+	agentUninstalls      int
+	hasTray              bool
+	agentUserID          int
+}
+
+func (m *fakeManager) InstallAgents(_ appPaths, hasTray bool, userID int) error {
+	m.agentInstalls++
+	m.hasTray, m.agentUserID = hasTray, userID
+	return nil
+}
+
+func (m *fakeManager) UninstallAgents(appPaths, int) error {
+	m.agentUninstalls++
+	return nil
 }
 
 func (m *fakeManager) Install(appPaths) error {
@@ -51,15 +66,16 @@ func newTestInstaller(t *testing.T, answer string) (*installer, *fakeManager, *b
 	manager := &fakeManager{}
 	var stdout bytes.Buffer
 	in := &installer{
-		paths:      paths,
-		manager:    manager,
-		executable: func() (string, error) { return source, nil },
-		isRoot:     func() bool { return true },
-		flushDNS:   func() {},
-		now:        func() time.Time { return testStart },
-		user:       "ivan",
-		stdin:      strings.NewReader(answer),
-		stdout:     &stdout,
+		paths:         paths,
+		manager:       manager,
+		executable:    func() (string, error) { return source, nil },
+		isRoot:        func() bool { return true },
+		flushDNS:      func() {},
+		consoleUserID: func() int { return 501 },
+		now:           func() time.Time { return testStart },
+		user:          "ivan",
+		stdin:         strings.NewReader(answer),
+		stdout:        &stdout,
 	}
 	return in, manager, &stdout
 }
@@ -280,5 +296,31 @@ func TestCommandStatusVerbose(t *testing.T) {
 		if !strings.Contains(stdout.String(), testCase.want) || strings.Contains(stdout.String(), testCase.notWant) {
 			t.Errorf("status %v must show %q and not %q:\n%s", testCase.args, testCase.want, testCase.notWant, stdout.String())
 		}
+	}
+}
+
+func TestInstallTrayAndAgents(t *testing.T) {
+	in, manager, stdout := newTestInstaller(t, "yes\n")
+	if err := in.commandInstall(nil); err != nil {
+		t.Fatal(err)
+	}
+	if manager.agentInstalls != 1 || manager.hasTray || manager.agentUserID != 501 || !strings.Contains(stdout.String(), "has no tray icon") {
+		t.Errorf("without the tray binary, the install must start only the notices: %+v\n%s", manager, stdout.String())
+	}
+	source, _ := in.executable()
+	if err := os.WriteFile(filepath.Join(filepath.Dir(source), trayBinaryName), []byte("tray"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := in.commandInstall(nil); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(in.paths.TrayBinary); err != nil || string(data) != "tray" || !manager.hasTray {
+		t.Errorf("the install must copy the tray binary and start the tray: %q, %v, %+v", data, err, manager)
+	}
+	if err := in.commandUninstall(); err != nil {
+		t.Fatal(err)
+	}
+	if manager.agentUninstalls != 1 {
+		t.Error("the uninstall must stop the agents")
 	}
 }

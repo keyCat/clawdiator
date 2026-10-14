@@ -26,10 +26,18 @@ type appPaths struct {
 	ControlSocket string
 	// Plist is the LaunchDaemon. Only macOS uses it.
 	Plist string
+	// TrayBinary is the binary with the tray. A root service must not link the Cocoa framework, so the tray has its own binary.
+	TrayBinary string
+	// AgentPlist and TrayPlist are the LaunchAgents of the notice agent and of the tray. Only macOS uses them.
+	AgentPlist string
+	TrayPlist  string
 	// Link is the link for the CLI in a folder of PATH.
 	Link  string
 	Hosts string
 }
+
+// trayBinaryName is the name of the binary with the tray. The release puts it next to the main binary.
+const trayBinaryName = appName + "-tray"
 
 // getAppPaths returns the locations on this computer.
 func getAppPaths() appPaths {
@@ -67,6 +75,9 @@ func newAppPaths(root string) appPaths {
 		paths.SocketDir = filepath.Join(root, "/var/run", appName)
 		paths.ControlDir = filepath.Join(paths.SocketDir, "private")
 		paths.Plist = filepath.Join(root, "/Library/LaunchDaemons", launchdLabel+".plist")
+		paths.TrayBinary = filepath.Join(paths.Dir, "bin", trayBinaryName)
+		paths.AgentPlist = filepath.Join(root, "/Library/LaunchAgents", agentLabel+".plist")
+		paths.TrayPlist = filepath.Join(root, "/Library/LaunchAgents", trayLabel+".plist")
 		paths.Link = filepath.Join(root, "/usr/local/bin", appName)
 		paths.Hosts = filepath.Join(root, "/etc/hosts")
 	}

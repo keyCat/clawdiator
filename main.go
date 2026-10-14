@@ -43,6 +43,10 @@ func main() {
 		err = commandHosts(paths.Hosts, args, os.Stdout, newInstaller(paths).commandRemoveBlock)
 	case "service":
 		err = commandService(paths)
+	case "agent":
+		err = commandAgent(paths, args)
+	case "tray":
+		err = commandTray(paths)
 	case "help", "-h", "--help":
 		fmt.Print(text(msgUsage))
 		return

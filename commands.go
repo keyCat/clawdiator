@@ -26,23 +26,26 @@ type installer struct {
 	executable func() (string, error)
 	isRoot     func() bool
 	flushDNS   func()
-	now        func() time.Time
-	user       string
-	stdin      io.Reader
-	stdout     io.Writer
+	// consoleUserID returns the user at the screen. The installation starts the agents in the session of this user.
+	consoleUserID func() int
+	now           func() time.Time
+	user          string
+	stdin         io.Reader
+	stdout        io.Writer
 }
 
 func newInstaller(paths appPaths) *installer {
 	return &installer{
-		paths:      paths,
-		manager:    launchdManager{},
-		executable: os.Executable,
-		isRoot:     func() bool { return os.Geteuid() == 0 },
-		flushDNS:   func() { _ = flushDNS() },
-		now:        time.Now,
-		user:       getUserName(),
-		stdin:      os.Stdin,
-		stdout:     os.Stdout,
+		paths:         paths,
+		manager:       launchdManager{},
+		executable:    os.Executable,
+		isRoot:        func() bool { return os.Geteuid() == 0 },
+		flushDNS:      func() { _ = flushDNS() },
+		consoleUserID: getConsoleUserID,
+		now:           time.Now,
+		user:          getUserName(),
+		stdin:         os.Stdin,
+		stdout:        os.Stdout,
 	}
 }
 
@@ -110,6 +113,10 @@ func (in *installer) commandInstall(args []string) error {
 	if err := in.installBinary(); err != nil {
 		return errorf(msgCannotCopyBinary, err)
 	}
+	hasTray, err := in.installTrayBinary()
+	if err != nil {
+		return errorf(msgCannotCopyBinary, err)
+	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
@@ -121,6 +128,15 @@ func (in *installer) commandInstall(args []string) error {
 		return errorf(msgCannotRegister, err)
 	}
 	fmt.Fprintln(in.stdout, text(msgInstalled, in.paths.Dir))
+	// Without the agents, the service still blocks. So a failure of the agents is a warning, not an error.
+	if !hasTray {
+		fmt.Fprintln(in.stdout, text(msgTrayMissing, trayBinaryName))
+	}
+	if err := in.manager.InstallAgents(in.paths, hasTray, in.consoleUserID()); err != nil {
+		fmt.Fprintln(in.stdout, text(msgAgentsNotStarted, err))
+	} else {
+		fmt.Fprintln(in.stdout, text(msgAgentsStarted))
+	}
 	if err := createLink(in.paths.Link, in.paths.Binary); err != nil {
 		fmt.Fprintln(in.stdout, text(msgLinkNotCreated, err))
 	} else if in.paths.Link != "" {
@@ -152,6 +168,27 @@ func (in *installer) installBinary() error {
 	return writeRootFile(in.paths.Binary, data, 0o755)
 }
 
+// installTrayBinary copies the tray binary from the folder of the running binary. The release puts it there.
+// The result tells if the tray binary is installed. A build without the tray binary is not an error.
+func (in *installer) installTrayBinary() (bool, error) {
+	source, err := in.executable()
+	if err != nil {
+		return false, err
+	}
+	trayPath := filepath.Join(filepath.Dir(source), trayBinaryName)
+	if isSameFile(trayPath, in.paths.TrayBinary) {
+		return true, nil
+	}
+	data, err := os.ReadFile(trayPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, writeRootFile(in.paths.TrayBinary, data, 0o755)
+}
+
 // commandUninstall removes all changes. It continues after a failed step, so that it also works without the network
 // and with a damaged installation. It stops the service first, so that the service cannot write the block again.
 func (in *installer) commandUninstall() error {
@@ -166,6 +203,9 @@ func (in *installer) commandUninstall() error {
 			return
 		}
 		fmt.Fprintln(in.stdout, text(msgStepDone, text(step)))
+	}
+	if in.paths.AgentPlist != "" {
+		report(msgStepStopAgents, in.manager.UninstallAgents(in.paths, in.consoleUserID()))
 	}
 	if in.paths.Plist != "" {
 		report(msgStepStopService, in.manager.Uninstall(in.paths))

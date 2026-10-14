@@ -152,6 +152,53 @@ const (
 	msgPausedUntil
 	msgResumed
 	msgNoPauseActive
+	msgFlagAgentShow
+	msgTrayNotBuilt
+	msgTrayMissing
+	msgAgentsStarted
+	msgAgentsNotStarted
+	msgStepStopAgents
+	msgNoticeServiceDown
+	msgNoticeServiceBack
+	msgNoticeWelcome
+	msgNoticeWelcomeNoCountry
+	msgNoticePreBlock
+	msgNoticeBlockedOne
+	msgNoticeBlockedMany
+	msgNoticeBlockedUnknownOne
+	msgNoticeBlockedUnknownMany
+	msgNoticeAvailableOne
+	msgNoticeAvailableMany
+	msgNoticeAvailableCountryOne
+	msgNoticeAvailableCountryMany
+	msgNoticePausedForever
+	msgNoticePausedUntil
+	msgNoticePauseEnd
+	msgNoticePauseBlock
+	msgNoticeServiceError
+	msgAnd
+	msgTrayCountry
+	msgTrayCountryUnknown
+	msgTrayLastCheck
+	msgTrayTooltipOpen
+	msgTrayTooltipPreBlocked
+	msgTrayTooltipBlocked
+	msgTrayTooltipPaused
+	msgTrayCheckNow
+	msgTrayPause
+	msgTrayPause30m
+	msgTrayPause1h
+	msgTrayPause4h
+	msgTrayPause1d
+	msgTrayPause3d
+	msgTrayPauseForever
+	msgTrayResume
+	msgTrayNotices
+	msgTrayNoticesLong
+	msgTrayNoticesAll
+	msgTraySettings
+	msgTrayShowLog
+	msgTrayHide
 	messageCount
 )
 
@@ -311,5 +358,52 @@ Type "yes" to agree: `,
 	msgPausedUntil: {"The block is paused until %s.", "Блокировка на паузе до %s."},
 	msgResumed: {"The pause stopped. The block applies until the full check passes.",
 		"Пауза завершена. Блокировка действует, пока полная проверка не пройдёт."},
-	msgNoPauseActive: {"no pause is on", "пауза не включена"},
+	msgNoPauseActive:              {"no pause is on", "пауза не включена"},
+	msgFlagAgentShow:              {"show the tray icon again after \"Hide the icon\", and stop", "снова показать значок в трее после «Скрыть значок» и завершить работу"},
+	msgTrayNotBuilt:               {"this binary has no tray. Use clawdiator-tray", "в этой программе нет значка в трее. Используйте clawdiator-tray"},
+	msgTrayMissing:                {"%s is not next to this binary, so the installation has no tray icon. The notices work.", "%s нет рядом с этой программой, поэтому установка без значка в трее. Уведомления работают."},
+	msgAgentsStarted:              {"The notices and the tray icon start in your session. Other users get them at their next login.", "Уведомления и значок в трее запускаются в вашем сеансе. Другие пользователи получат их при следующем входе."},
+	msgAgentsNotStarted:           {"CAUTION: the notices and the tray icon did not start: %v. They start at your next login.", "ВНИМАНИЕ: уведомления и значок в трее не запустились: %v. Они запустятся при следующем входе."},
+	msgStepStopAgents:             {"stop and remove the notices and the tray icon", "остановить и удалить уведомления и значок в трее"},
+	msgNoticeServiceDown:          {"The clawdiator service does not work. The block can be missing.", "Служба clawdiator не работает. Блокировки может не быть."},
+	msgNoticeServiceBack:          {"The clawdiator service works again.", "Служба clawdiator снова работает."},
+	msgNoticeWelcome:              {"clawdiator works. Country: %s.", "clawdiator работает. Страна: %s."},
+	msgNoticeWelcomeNoCountry:     {"clawdiator works. The country check is not complete yet.", "clawdiator работает. Проверка страны ещё не завершена."},
+	msgNoticePreBlock:             {"%s are blocked until the country check ends.", "%s заблокированы, пока проверка страны не завершится."},
+	msgNoticeBlockedOne:           {"%s is blocked. Country: %s.", "%s заблокирован. Страна: %s."},
+	msgNoticeBlockedMany:          {"%s are blocked. Country: %s.", "%s заблокированы. Страна: %s."},
+	msgNoticeBlockedUnknownOne:    {"%s is blocked. The country is unknown.", "%s заблокирован. Страна неизвестна."},
+	msgNoticeBlockedUnknownMany:   {"%s are blocked. The country is unknown.", "%s заблокированы. Страна неизвестна."},
+	msgNoticeAvailableOne:         {"%s is available again.", "%s снова доступен."},
+	msgNoticeAvailableMany:        {"%s are available again.", "%s снова доступны."},
+	msgNoticeAvailableCountryOne:  {"%s is available again. Country: %s.", "%s снова доступен. Страна: %s."},
+	msgNoticeAvailableCountryMany: {"%s are available again. Country: %s.", "%s снова доступны. Страна: %s."},
+	msgNoticePausedForever:        {"The block is paused with no end.", "Блокировка на паузе без конца."},
+	msgNoticePausedUntil:          {"The block is paused until %s.", "Блокировка на паузе до %s."},
+	msgNoticePauseEnd:             {"The pause ended. The country check applies again.", "Пауза закончилась. Проверка страны снова действует."},
+	msgNoticePauseBlock:           {"%s: not available in %s. The pause is on.", "%s: недоступно в %s. Пауза включена."},
+	msgNoticeServiceError:         {"The clawdiator service has a problem: %s", "У службы clawdiator проблема: %s"},
+	msgAnd:                        {" and ", " и "},
+	msgTrayCountry:                {"Country: %s", "Страна: %s"},
+	msgTrayCountryUnknown:         {"Country: unknown", "Страна: неизвестна"},
+	msgTrayLastCheck:              {"Last check: %s", "Последняя проверка: %s"},
+	msgTrayTooltipOpen:            {"clawdiator: Anthropic and OpenAI are open", "clawdiator: Anthropic и OpenAI открыты"},
+	msgTrayTooltipPreBlocked:      {"clawdiator: blocked until the country check ends", "clawdiator: заблокировано до конца проверки страны"},
+	msgTrayTooltipBlocked:         {"clawdiator: blocked", "clawdiator: заблокировано"},
+	msgTrayTooltipPaused:          {"clawdiator: the block is paused", "clawdiator: блокировка на паузе"},
+	msgTrayCheckNow:               {"Check now", "Проверить сейчас"},
+	msgTrayPause:                  {"Pause", "Пауза"},
+	msgTrayPause30m:               {"30 minutes", "30 минут"},
+	msgTrayPause1h:                {"1 hour", "1 час"},
+	msgTrayPause4h:                {"4 hours", "4 часа"},
+	msgTrayPause1d:                {"1 day", "1 день"},
+	msgTrayPause3d:                {"3 days", "3 дня"},
+	msgTrayPauseForever:           {"Until I resume", "Пока я не продолжу"},
+	msgTrayResume:                 {"Resume", "Продолжить"},
+	msgTrayNotices:                {"Notices after a wake", "Уведомления после выхода из сна"},
+	msgTrayNoticesLong:            {"Only long blocks", "Только долгие блокировки"},
+	msgTrayNoticesAll:             {"All", "Все"},
+	msgTraySettings:               {"Open settings…", "Открыть настройки…"},
+	msgTrayShowLog:                {"Show the log", "Показать журнал"},
+	msgTrayHide:                   {"Hide the icon", "Скрыть значок"},
 }
