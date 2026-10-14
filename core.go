@@ -1,0 +1,378 @@
+package main
+
+import (
+	"net/netip"
+	"slices"
+	"strings"
+	"time"
+
+	"geocheck"
+)
+
+// These constants set the times, the retries and the number of lookups of the core.
+const (
+	// probeInterval is the time between 2 probes to the Cloudflare trace.
+	probeInterval = 30 * time.Second
+	// fullCheckInterval is the time between 2 full checks when nothing changes.
+	fullCheckInterval = 60 * time.Minute
+	// probeFailureCheckInterval is the minimum time between 2 full checks that a failed probe starts.
+	probeFailureCheckInterval = 5 * time.Minute
+	// retryInterval is the time before the next full check after a failed full check.
+	retryInterval = 30 * time.Second
+	// slowRetryInterval replaces retryInterval after slowRetryAfter failed full checks in a row.
+	// Many fast retries can go above the request limits of the location services.
+	slowRetryInterval = 5 * time.Minute
+	slowRetryAfter    = 4
+	// wakeGap is the gap between 2 ticks that counts as a wake from sleep.
+	// The driver calls tick every 2 seconds, so a longer gap means that the computer slept.
+	wakeGap = 30 * time.Second
+	// preBlockRounds is the number of lookups of a full check during a pre-block.
+	// The pre-block already blocks, so the service does not wait for more lookups. It tries again after retryInterval.
+	preBlockRounds = 1
+	// steadyRounds is the number of lookups of a full check when the network did not change.
+	steadyRounds = 3
+)
+
+type actionKind int
+
+const (
+	// actionProbe asks the driver to send 1 probe to the Cloudflare trace.
+	actionProbe actionKind = iota
+	// actionFullCheck asks the driver to start a full check. The driver stops a full check of an older generation first.
+	actionFullCheck
+)
+
+// action is a request from the core to the driver. The core itself sends no requests and changes no files.
+type action struct {
+	Kind actionKind
+	// Generation is the network generation at the start. The core ignores a result of an older generation.
+	Generation int
+	// Rounds is the number of lookups of a full check.
+	Rounds int
+}
+
+// core holds the logic of the service. It reads no clock, so the tests can drive it with fixed times.
+//
+// The driver must follow these rules:
+//   - It calls tick every 2 seconds. All calls of the core come from 1 goroutine, because the core has no locks.
+//   - It never waits for the network in that goroutine. Probes and full checks run in other goroutines,
+//     and their results come back over a channel. Otherwise a full check of 35 seconds stops the ticks,
+//     the next tick counts as a wake, and the service never leaves the pre-block.
+//   - Before it starts a full check, it stops a running full check of an older generation.
+//   - The full check asks the services of addProbeService.
+//   - After each call, it applies blockedProviders. It saves state.json after each change and at least every 30 seconds,
+//     because the agent watches the heartbeat.
+type core struct {
+	state *serviceState
+	// blockedCountries holds more country codes to block, from the config.
+	blockedCountries []string
+
+	// generation increases at each change of the network. A result of an older generation is not valid.
+	generation  int
+	fingerprint string
+	lastTick    time.Time
+	lastProbe   time.Time
+	// isProbeRunning tells if a probe started and its result did not come back.
+	isProbeRunning bool
+	// checkGeneration is the generation of the full check that runs now. 0 means that no full check runs.
+	checkGeneration int
+	// failures is the number of failed full checks in a row.
+	failures              int
+	nextRetry             time.Time
+	lastProbeFailureCheck time.Time
+}
+
+func newCore(state *serviceState, blockedCountries []string) *core {
+	return &core{state: state, blockedCountries: blockedCountries}
+}
+
+// tick runs every 2 seconds. The fingerprint identifies the network:
+// the interface of the default route and its stable addresses.
+func (c *core) tick(now time.Time, fingerprint string) []action {
+	// Use the wall clock. The monotonic clock can stop while the computer sleeps.
+	now = now.Round(0)
+	isStart := c.lastTick.IsZero()
+	isWake := !isStart && now.Sub(c.lastTick) > wakeGap
+	isChange := isStart || isWake || fingerprint != c.fingerprint
+	c.lastTick = now
+	c.fingerprint = fingerprint
+	c.state.Heartbeat = now
+
+	if c.state.Pause.IsOn && !c.state.Pause.Until.IsZero() && !now.Before(c.state.Pause.Until) {
+		c.endPause(now)
+		isChange = true
+	}
+	var actions []action
+	if isChange {
+		actions = append(actions, c.changeNetwork(now))
+	}
+	if c.checkGeneration == 0 {
+		isRetryDue := c.failures > 0 && !now.Before(c.nextRetry)
+		isHourDue := c.failures == 0 && now.Sub(c.state.LastFullCheck) >= fullCheckInterval
+		if isRetryDue || isHourDue {
+			actions = append(actions, c.startCheck())
+		}
+	}
+	if !c.isProbeRunning && now.Sub(c.lastProbe) >= probeInterval {
+		c.isProbeRunning = true
+		c.lastProbe = now
+		actions = append(actions, action{Kind: actionProbe, Generation: c.generation})
+	}
+	return actions
+}
+
+// changeNetwork starts a new generation and a full check.
+// Outside a pause, it blocks all providers until a full check passes.
+func (c *core) changeNetwork(now time.Time) action {
+	c.generation++
+	c.failures = 0
+	if !c.state.Pause.IsOn && !c.state.IsPreBlocked {
+		c.state.IsPreBlocked = true
+		c.state.PreBlockSince = now
+		c.addEvent(now, event{Kind: eventPreBlock})
+	}
+	return c.startCheck()
+}
+
+// startCheck marks a full check of the current generation as started. A full check during a pre-block does preBlockRounds lookups. Other full checks do steadyRounds lookups.
+func (c *core) startCheck() action {
+	c.checkGeneration = c.generation
+	rounds := steadyRounds
+	if c.state.IsPreBlocked {
+		rounds = preBlockRounds
+	}
+	return action{Kind: actionFullCheck, Generation: c.generation, Rounds: rounds}
+}
+
+// requestCheck starts a full check, if no full check of the current generation runs.
+func (c *core) requestCheck() []action {
+	if c.checkGeneration == c.generation {
+		return nil
+	}
+	return []action{c.startCheck()}
+}
+
+// handleCheck takes the result of a full check. A result of an older generation is not valid, because the network changed.
+func (c *core) handleCheck(now time.Time, generation int, result geocheck.Result, lookupErr error) {
+	now = now.Round(0)
+	if generation != c.generation || c.checkGeneration != generation {
+		return
+	}
+	c.checkGeneration = 0
+	if lookupErr != nil {
+		c.failures++
+		delay := retryInterval
+		if c.failures >= slowRetryAfter {
+			delay = slowRetryInterval
+		}
+		c.nextRetry = now.Add(delay)
+		if !c.state.IsPreBlocked {
+			// The network did not change, and the full check did steadyRounds lookups.
+			c.applyVerdicts(now, c.getVerdicts(geocheck.Result{}, lookupErr))
+		}
+		return
+	}
+	c.failures = 0
+	c.state.LastFullCheck = now
+	c.state.LastResult = result
+	c.state.Country = strings.Join(result.Countries(), " / ")
+	if ip := getResultIP(result); ip != "" {
+		c.state.PublicIP = ip
+	}
+	c.applyVerdicts(now, c.getVerdicts(result, nil))
+	if c.state.IsPreBlocked {
+		c.state.IsPreBlocked = false
+		c.state.PreBlockSince = time.Time{}
+		c.addEvent(now, event{Kind: eventPreBlockEnd})
+	}
+}
+
+// handleProbe takes the result of a probe. The probe can make the result stricter, but it cannot remove a block.
+func (c *core) handleProbe(now time.Time, generation int, location geocheck.Location, probeErr error) []action {
+	now = now.Round(0)
+	c.isProbeRunning = false
+	if generation != c.generation {
+		return nil
+	}
+	if probeErr != nil {
+		// A failed probe is not a change of the network, and it does not block. Only a failed full check blocks.
+		if c.checkGeneration != 0 || c.failures > 0 || now.Sub(c.lastProbeFailureCheck) < probeFailureCheckInterval {
+			return nil
+		}
+		c.lastProbeFailureCheck = now
+		return []action{c.startCheck()}
+	}
+	if location.IP != "" {
+		if c.state.PublicIP != "" && !isSameNetwork(c.state.PublicIP, location.IP) {
+			// Move the known address at once. Otherwise the next probe sees the same change again and stops the full check.
+			c.state.PublicIP = location.IP
+			return []action{c.changeNetwork(now)}
+		}
+		if c.state.PublicIP == "" {
+			c.state.PublicIP = location.IP
+		}
+	}
+	// The trace has no region. The probe uses the region that the last full check gives for the same country.
+	// Without it, each probe in Ukraine gives RegionUnknown and blocks again.
+	if location.Region == "" {
+		location.Region = c.state.LastResult.Region(location.Country)
+	}
+	probeResult := geocheck.Result{Locations: []geocheck.Location{location}}
+	stricterVerdicts := map[geocheck.Provider]geocheck.Verdict{}
+	for _, provider := range geocheck.Providers() {
+		verdict := geocheck.Check(provider, probeResult, nil, c.blockedCountries)
+		if !verdict.Allowed() && !c.state.provider(provider).IsBlocked {
+			stricterVerdicts[provider] = verdict
+		}
+	}
+	if len(stricterVerdicts) > 0 {
+		c.applyVerdicts(now, stricterVerdicts)
+	}
+	// After a failed full check, only the retry schedule starts a full check. Otherwise each probe goes around the slow retries.
+	isNewCountry := !hasCountry(c.state.LastResult, location.Country)
+	if (len(stricterVerdicts) > 0 || isNewCountry) && c.failures == 0 {
+		return c.requestCheck()
+	}
+	return nil
+}
+
+// pause starts a pause. A zero until means a pause with no end. The pause removes the block at once.
+func (c *core) pause(now time.Time, until time.Time, user string) {
+	now = now.Round(0)
+	c.state.Pause = pauseState{IsOn: true, Since: now, Until: until.Round(0), User: user}
+	c.state.IsPreBlocked = false
+	c.state.PreBlockSince = time.Time{}
+	c.addEvent(now, event{Kind: eventPause, Until: c.state.Pause.Until, User: user})
+}
+
+// resume stops the pause. Then the service blocks all providers until a full check passes.
+func (c *core) resume(now time.Time) []action {
+	now = now.Round(0)
+	if !c.state.Pause.IsOn {
+		return nil
+	}
+	c.endPause(now)
+	return []action{c.changeNetwork(now)}
+}
+
+// endPause stops the pause. The block of the last verdicts applies again, so it adds a block event for them.
+func (c *core) endPause(now time.Time) {
+	c.state.Pause = pauseState{}
+	c.addEvent(now, event{Kind: eventPauseEnd})
+	blockEvent := event{Kind: eventBlock, Reasons: map[geocheck.Provider]string{}}
+	for _, provider := range geocheck.Providers() {
+		state := c.state.provider(provider)
+		if state.IsBlocked {
+			addToEvent(&blockEvent, provider, state)
+		}
+	}
+	if len(blockEvent.Providers) > 0 {
+		c.addEvent(now, blockEvent)
+	}
+}
+
+// addError adds an event for an error of the driver, for example a failed change of the hosts file.
+func (c *core) addError(now time.Time, message string) {
+	c.addEvent(now.Round(0), event{Kind: eventError, Error: message})
+}
+
+// getVerdicts applies the strict rule of geocheck for each provider.
+func (c *core) getVerdicts(result geocheck.Result, lookupErr error) map[geocheck.Provider]geocheck.Verdict {
+	verdicts := map[geocheck.Provider]geocheck.Verdict{}
+	for _, provider := range geocheck.Providers() {
+		verdicts[provider] = geocheck.Check(provider, result, lookupErr, c.blockedCountries)
+	}
+	return verdicts
+}
+
+// applyVerdicts saves the verdicts. It adds 1 event for the providers that are now blocked,
+// and 1 event for the providers that are now allowed. During a pause, the events tell about the verdicts only.
+func (c *core) applyVerdicts(now time.Time, verdicts map[geocheck.Provider]geocheck.Verdict) {
+	blockEvent := event{Kind: eventBlock, Reasons: map[geocheck.Provider]string{}}
+	unblockEvent := event{Kind: eventUnblock, Reasons: map[geocheck.Provider]string{}}
+	if c.state.Pause.IsOn {
+		blockEvent.Kind, unblockEvent.Kind = eventPauseBlock, eventPauseUnblock
+	}
+	for _, provider := range geocheck.Providers() {
+		verdict, hasVerdict := verdicts[provider]
+		if !hasVerdict {
+			continue
+		}
+		state := c.state.provider(provider)
+		isBlocked := !verdict.Allowed()
+		state.Verdict = verdict.Kind.String()
+		state.Country = verdict.Location.Country
+		state.Reason = verdict.ReasonWithReplies()
+		if isBlocked == state.IsBlocked {
+			continue
+		}
+		state.IsBlocked = isBlocked
+		state.Since = now
+		if isBlocked {
+			addToEvent(&blockEvent, provider, state)
+		} else {
+			addToEvent(&unblockEvent, provider, state)
+		}
+	}
+	for _, change := range []event{blockEvent, unblockEvent} {
+		if len(change.Providers) > 0 {
+			c.addEvent(now, change)
+		}
+	}
+}
+
+// addToEvent adds the provider to the event. The first provider gives the country and the kind of the verdict.
+func addToEvent(change *event, provider geocheck.Provider, state *providerState) {
+	if len(change.Providers) == 0 {
+		change.Country, change.Verdict = state.Country, state.Verdict
+	}
+	change.Providers = append(change.Providers, provider)
+	change.Reasons[provider] = state.Reason
+}
+
+// addEvent gives the event the next sequence number and keeps only the last maxEvents events.
+func (c *core) addEvent(now time.Time, change event) {
+	c.state.LastEventSeq++
+	change.Seq = c.state.LastEventSeq
+	change.Time = now
+	c.state.Events = append(c.state.Events, change)
+	if len(c.state.Events) > maxEvents {
+		c.state.Events = slices.Clone(c.state.Events[len(c.state.Events)-maxEvents:])
+	}
+}
+
+// getResultIP returns the first public IP address of the replies. Now only the cloudflare service gives it.
+func getResultIP(result geocheck.Result) string {
+	for _, location := range result.Locations {
+		if location.IP != "" {
+			return location.IP
+		}
+	}
+	return ""
+}
+
+// hasCountry tells if a reply of the result has the country.
+func hasCountry(result geocheck.Result, country string) bool {
+	return slices.ContainsFunc(result.Locations, func(location geocheck.Location) bool { return location.Country == country })
+}
+
+// isSameNetwork tells if 2 public addresses are in the same network.
+// For IPv6, it compares the /64 prefixes, because the system changes the temporary IPv6 addresses often.
+// Addresses of different families cannot show a change, so the result is true.
+func isSameNetwork(first, second string) bool {
+	firstAddress, firstErr := netip.ParseAddr(first)
+	secondAddress, secondErr := netip.ParseAddr(second)
+	if firstErr != nil || secondErr != nil {
+		return first == second
+	}
+	firstAddress, secondAddress = firstAddress.Unmap(), secondAddress.Unmap()
+	if firstAddress.Is4() != secondAddress.Is4() {
+		return true
+	}
+	if firstAddress.Is4() {
+		return firstAddress == secondAddress
+	}
+	firstPrefix, _ := firstAddress.Prefix(64)
+	secondPrefix, _ := secondAddress.Prefix(64)
+	return firstPrefix == secondPrefix
+}
