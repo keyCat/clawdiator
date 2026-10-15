@@ -118,6 +118,9 @@ const (
 	msgStepRemoveLink
 	msgStepRemoveSockets
 	msgStepRemoveFolder
+	msgStepRemoveUserFiles
+	msgUserFolderKept
+	msgUserFolderNotRemoved
 	msgUninstallIncomplete
 	msgUninstalled
 	msgServiceWritesAgain
@@ -332,6 +335,12 @@ Type "yes" to agree: `,
 	msgStepRemoveLink:    {"remove the link of the command", "удалить ссылку команды"},
 	msgStepRemoveSockets: {"remove the sockets", "удалить сокеты"},
 	msgStepRemoveFolder:  {"remove the app folder", "удалить папку приложения"},
+	msgStepRemoveUserFiles: {"remove the files of the notices in the home folders of the users",
+		"удалить файлы уведомлений в домашних папках пользователей"},
+	msgUserFolderKept: {"        %s has other files, so the tool kept the folder. Remove it manually if you do not need the files.",
+		"        в %s есть другие файлы, поэтому программа оставила папку. Удалите её вручную, если файлы не нужны."},
+	msgUserFolderNotRemoved: {"        The tool did not remove %s: %v",
+		"        Программа не удалила %s: %v"},
 	msgUninstallIncomplete: {"some steps failed. Correct the problem and run the command again",
 		"некоторые шаги не выполнены. Устраните проблему и выполните команду снова"},
 	msgUninstalled: {"clawdiator is removed.", "clawdiator удалён."},

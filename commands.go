@@ -254,6 +254,17 @@ func (in *installer) commandUninstall() error {
 	}
 	report(msgStepRemoveSockets, os.RemoveAll(in.paths.SocketDir))
 	report(msgStepRemoveFolder, os.RemoveAll(in.paths.Dir))
+	if in.paths.UsersDir != "" {
+		kept, err := removeUserFiles(in.paths.UsersDir)
+		report(msgStepRemoveUserFiles, err)
+		for _, folder := range kept {
+			if folder.Err != nil {
+				fmt.Fprintln(in.stdout, text(msgUserFolderNotRemoved, folder.Path, folder.Err))
+			} else {
+				fmt.Fprintln(in.stdout, text(msgUserFolderKept, folder.Path))
+			}
+		}
+	}
 	if !isComplete {
 		return errorf(msgUninstallIncomplete)
 	}

@@ -34,6 +34,9 @@ type appPaths struct {
 	// Link is the link for the CLI in a folder of PATH.
 	Link  string
 	Hosts string
+	// UsersDir holds the home folders of the users. uninstall removes the folder of clawdiator in each home folder.
+	// Only macOS uses it now.
+	UsersDir string
 }
 
 // trayBinaryName is the name of the binary with the tray. The release puts it next to the main binary.
@@ -80,6 +83,7 @@ func newAppPaths(root string) appPaths {
 		paths.TrayPlist = filepath.Join(root, "/Library/LaunchAgents", trayLabel+".plist")
 		paths.Link = filepath.Join(root, "/usr/local/bin", appName)
 		paths.Hosts = filepath.Join(root, "/etc/hosts")
+		paths.UsersDir = filepath.Join(root, "/Users")
 	}
 	paths.Config = filepath.Join(paths.Dir, "config.json")
 	paths.State = filepath.Join(paths.Dir, "state.json")
