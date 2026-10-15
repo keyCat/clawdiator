@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"path/filepath"
 	"time"
 
@@ -82,6 +83,8 @@ func startTray(paths appPaths) {
 	go func() {
 		var watcher heartbeatWatcher
 		lastColor := trayColor(-1)
+		// The watch changes the icon soon after each save of the service. The poll every 2 seconds is the backup.
+		changes := watchFiles(context.Background(), paths.State)
 		for {
 			state := readServiceState(paths.State)
 			heartbeat := time.Time{}
@@ -111,7 +114,10 @@ func startTray(paths appPaths) {
 			settings, _ := loadAgentSettings(settingsPath)
 			setChecked(longItem, settings.PreBlockNotices == preBlockNoticesLong)
 			setChecked(allItem, settings.PreBlockNotices == preBlockNoticesAll)
-			time.Sleep(agentInterval)
+			select {
+			case <-changes:
+			case <-time.After(agentInterval):
+			}
 		}
 	}()
 }

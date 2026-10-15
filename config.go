@@ -12,7 +12,7 @@ import (
 )
 
 // consentVersion is the version of the consent text. Increase it when the text changes. Then install asks again.
-const consentVersion = 2
+const consentVersion = 3
 
 // Config is the content of config.json.
 type Config struct {

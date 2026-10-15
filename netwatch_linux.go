@@ -43,5 +43,5 @@ func watchNetwork(ctx context.Context) <-chan struct{} {
 			}
 		}
 	}()
-	return debounceEvents(ctx, messages, networkEventDelay)
+	return messages
 }

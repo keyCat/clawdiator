@@ -55,7 +55,12 @@ type event struct {
 	// User is the user who started a pause.
 	User  string `json:"user,omitempty"`
 	Error string `json:"error,omitempty"`
+	// Cause tells why a pre-block started. preBlockCauseSleep is a pre-block before a sleep. An empty value is a change of the network.
+	Cause string `json:"cause,omitempty"`
 }
+
+// preBlockCauseSleep is the cause of a pre-block before a sleep of the computer.
+const preBlockCauseSleep = "sleep"
 
 // providerState is the last verdict for 1 provider.
 type providerState struct {
@@ -81,6 +86,16 @@ type checkFailure struct {
 type localDBState struct {
 	File      string    `json:"file,omitempty"`
 	BuildTime time.Time `json:"build_time,omitzero"`
+}
+
+// firewallState is the state of the firewall rules. Only root can read the rules of pf, so the status command reads this state.
+type firewallState struct {
+	// IsBlocked tells if the service turned the rules on, or tried to turn them on.
+	IsBlocked bool `json:"is_blocked,omitempty"`
+	// Token is the reference of clawdiator to the switch-on of pf. uninstall releases it.
+	Token string `json:"token,omitempty"`
+	// Error is the last error. It is empty after a successful change or check.
+	Error string `json:"error,omitempty"`
 }
 
 // pauseState tells if a pause is on.
@@ -113,6 +128,8 @@ type serviceState struct {
 	LastFailure checkFailure `json:"last_failure"`
 	// LocalDB is the file of the local database that the service uses. The status command shows it.
 	LocalDB localDBState `json:"local_db,omitzero"`
+	// Firewall is the state of the firewall rules for the ranges of Anthropic. Only macOS has these rules now.
+	Firewall firewallState `json:"firewall,omitzero"`
 	// LastEventSeq is the sequence number of the last event.
 	LastEventSeq int64   `json:"last_event_seq"`
 	Events       []event `json:"events"`

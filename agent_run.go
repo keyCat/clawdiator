@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,6 +33,8 @@ func commandAgent(paths appPaths, args []string) error {
 	settings, isFirstRun := loadAgentSettings(settingsPath)
 	model := newAgentModel(settings)
 	logAgent(logPath, "start, process %d, first run: %v", os.Getpid(), isFirstRun)
+	// The watch gives a notice soon after each save of the service. The poll every 2 seconds is the backup.
+	changes := watchFiles(context.Background(), paths.State)
 	for {
 		// The tray changes agent.json, so the agent reads it again at each pass.
 		settings, _ = loadAgentSettings(settingsPath)
@@ -46,7 +49,10 @@ func commandAgent(paths appPaths, args []string) error {
 				logAgent(logPath, "cannot save %s: %v", settingsPath, err)
 			}
 		}
-		time.Sleep(agentInterval)
+		select {
+		case <-changes:
+		case <-time.After(agentInterval):
+		}
 	}
 }
 

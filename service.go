@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	// tickInterval is the time between 2 passes of the loop.
-	tickInterval = 2 * time.Second
+	// tickInterval is the time between 2 passes of the loop. A short tick finds a wake, the end of a pause
+	// and a missed message about the network soon. The pass reads only local data, so it costs about 0.1 ms.
+	tickInterval = 250 * time.Millisecond
 	// saveInterval is the maximum time between 2 saves of state.json. The agent watches the heartbeat in the file.
 	saveInterval = 30 * time.Second
 	// userCheckInterval is the minimum time between 2 full checks that a user starts.
@@ -53,6 +54,12 @@ type dbBlockDone struct {
 	Location   geocheck.Location
 }
 
+// dnsFlushDone is the result of a flush of the DNS cache, for the verbose log.
+type dnsFlushDone struct {
+	Result   string
+	Duration time.Duration
+}
+
 // dbDone is the result of a download of the local database.
 type dbDone struct {
 	Month    string
@@ -73,20 +80,28 @@ type serviceDriver struct {
 	lookup         func(context.Context, geocheck.Options) (geocheck.Result, error)
 	getFingerprint func() string
 	writeHosts     func(hosts []string) (bool, error)
+	// hostsStamp returns the stamp of the hosts file. A new stamp shows a change by another program.
+	hostsStamp func() string
 	// flushDNS returns the result of each flush command for the verbose log.
 	flushDNS func() string
 	// spawn starts a goroutine. The tests replace it to see the order of the steps.
 	spawn func(task func())
+	// runFlush starts the flush of the DNS cache. The tests replace it, so that the flush runs in their goroutine.
+	runFlush func(task func())
 	// downloadDB downloads the file of the local database for the month, checks it and saves it.
 	downloadDB func(ctx context.Context, month string) (*countryDB, error)
+	// firewall controls the firewall rules for the ranges of Anthropic. It is nil on the systems without these rules.
+	firewall *pfFirewall
 
 	ctx         context.Context
 	results     chan any
 	requests    chan request
 	cancelCheck context.CancelFunc
 
-	appliedHosts  []string
-	isApplied     bool
+	appliedHosts []string
+	isApplied    bool
+	// appliedStamp is the stamp of the hosts file after the last write or check of the service.
+	appliedStamp  string
 	lastHostsErr  string
 	lastSave      time.Time
 	savedSeq      int64
@@ -97,6 +112,15 @@ type serviceDriver struct {
 	countryDB           *countryDB
 	isDBDownloadRunning bool
 	lastDBDownload      time.Time
+
+	// isFirewallKnown tells if the service applied the firewall rules after its start.
+	isFirewallKnown       bool
+	lastFirewallAttempt   time.Time
+	lastFirewallFullCheck time.Time
+	savedFirewall         firewallState
+	savedGeneration       int
+	// loggedSleepTimeouts is the count of sleepBlockTimeouts in the log.
+	loggedSleepTimeouts int64
 }
 
 // newServiceDriver returns a driver that uses the real system. The tests replace the functions.
@@ -111,6 +135,7 @@ func newServiceDriver(ctx context.Context, c *core, paths appPaths, checkOptions
 		writeHosts:     func(hosts []string) (bool, error) { return writeHostsFile(paths.Hosts, hosts) },
 		flushDNS:       flushDNS,
 		spawn:          func(task func()) { go task() },
+		runFlush:       func(task func()) { go task() },
 		ctx:            ctx,
 		results:        make(chan any, 8),
 		requests:       make(chan request),
@@ -118,6 +143,9 @@ func newServiceDriver(ctx context.Context, c *core, paths appPaths, checkOptions
 		loggedSeq:      c.state.LastEventSeq,
 	}
 	driver.downloadDB = newDBDownloader(paths.Dir)
+	driver.firewall = newFirewall()
+	driver.hostsStamp = func() string { return getFileStamp(paths.Hosts) }
+	driver.savedFirewall = c.state.Firewall
 	c.debugf = func(format string, args ...any) { driver.debugf("core", format, args...) }
 	return driver
 }
@@ -129,10 +157,23 @@ func (d *serviceDriver) debugf(component, format string, args ...any) {
 	_ = appendLogLimit(d.paths.DebugLog, []string{line}, maxDebugLogSize)
 }
 
+// loopInputs are the channels that start the passes of the loop. A nil channel never sends.
+type loopInputs struct {
+	ticks <-chan time.Time
+	// networkChanges gets a value at once after a message of the system about an interface or an address.
+	networkChanges <-chan struct{}
+	// fileChanges gets a value after a change of a watched file, for example the hosts file.
+	fileChanges <-chan struct{}
+	// sleeps gets a request before a sleep of the computer. wakes gets a value after the wake.
+	sleeps <-chan sleepRequest
+	wakes  <-chan struct{}
+}
+
 // run is the loop of the service. It never waits for the network: the probes and the full checks run in other goroutines.
-// A message of the system about a change of the network starts a pass at once, without a wait for the next tick.
-// A nil channel of network changes never sends, so then only the ticks start the passes.
-func (d *serviceDriver) run(ticks <-chan time.Time, networkChanges <-chan struct{}) {
+// A message of the system starts a pass at once, without a wait for the next tick.
+// A change of a watched file starts a pass without a tick: the pass checks the block.
+// Before a sleep, the loop applies the pre-block. Then it answers the request, so the system sleeps only after the block.
+func (d *serviceDriver) run(inputs loopInputs) {
 	for {
 		select {
 		case <-d.ctx.Done():
@@ -141,11 +182,30 @@ func (d *serviceDriver) run(ticks <-chan time.Time, networkChanges <-chan struct
 			}
 			d.afterStep(true)
 			return
-		case <-ticks:
+		case <-inputs.ticks:
 			d.handleTick()
-		case <-networkChanges:
-			d.debugf("network", "the system sent a message about a change of an interface or an address")
+		case request := <-inputs.sleeps:
+			start := time.Now()
+			d.core.prepareSleep(d.now())
+			d.afterStep(false)
+			close(request.Done)
+			d.debugf("power", "the computer goes to sleep: the pre-block took %v", time.Since(start).Round(time.Microsecond))
+			continue
+		case <-inputs.wakes:
+			d.debugf("power", "the computer woke up")
+			d.core.noteWake()
 			d.handleTick()
+		case <-inputs.networkChanges:
+			// The time of the pass is the time from the message to the applied block.
+			// Many messages change nothing, so only a pass with a change of the network writes a log line.
+			start, generation := time.Now(), d.core.generation
+			d.handleTick()
+			d.afterStep(false)
+			if d.core.generation != generation {
+				d.debugf("network", "a message of the system changed the network: the pass with the block took %v", time.Since(start).Round(time.Microsecond))
+			}
+			continue
+		case <-inputs.fileChanges:
 		case result := <-d.results:
 			d.handleResult(result)
 		case next := <-d.requests:
@@ -158,6 +218,10 @@ func (d *serviceDriver) run(ticks <-chan time.Time, networkChanges <-chan struct
 func (d *serviceDriver) handleTick() {
 	d.startActions(d.core.tick(d.now(), d.getFingerprint()))
 	d.startDBDownload()
+	if count := sleepBlockTimeouts.Load(); count != d.loggedSleepTimeouts {
+		d.loggedSleepTimeouts = count
+		d.debugf("power", "the answer to a sleep came after the timeout of %v, without the block. Count of such answers: %d", sleepBlockTimeout, count)
+	}
 }
 
 // startDBDownload starts a download of the local database, if the service has no file of the current month.
@@ -224,6 +288,8 @@ func (d *serviceDriver) handleResult(result any) {
 			_ = appendLog(d.paths.Log, []string{now.Round(0).Format(time.RFC3339) + " all check-failed " + cleanLogText(done.Err.Error())})
 		}
 		d.core.handleCheck(now, done.Generation, done.Result, done.Err)
+	case dnsFlushDone:
+		d.debugf("dns", "flush in %v: %s", done.Duration.Round(time.Microsecond), done.Result)
 	case dbDone:
 		d.isDBDownloadRunning = false
 		if done.Err != nil {
@@ -415,27 +481,114 @@ func (d *serviceDriver) sendResult(result any) {
 
 // afterStep applies the block, writes the log and saves the state. With isFinal, it always saves the state.
 func (d *serviceDriver) afterStep(isFinal bool) {
-	now := d.now()
+	// The wall clock also counts the sleep. With the monotonic clock, the first save after a long sleep comes 30 seconds late,
+	// and status then shows an old heartbeat.
+	now := d.now().Round(0)
 	d.applyBlock(now)
 	d.writeLog()
 	state := d.core.state
-	if isFinal || state.LastEventSeq != d.savedSeq || now.Sub(d.lastSave) >= saveInterval {
+	// The token of the firewall must be on the disk at once. Otherwise a crash loses it, and pf keeps the reference.
+	// A new generation saves at once too. After a wake, the pre-block is already on, so no event comes,
+	// but the agent needs the new heartbeat and the new start of the pre-block.
+	isChange := state.LastEventSeq != d.savedSeq || state.Firewall != d.savedFirewall || d.core.generation != d.savedGeneration
+	if isFinal || isChange || now.Sub(d.lastSave) >= saveInterval {
 		if err := saveServiceState(d.paths.State, state); err != nil {
 			d.debugf("state", "cannot save %s: %v", d.paths.State, err)
 		} else {
-			d.savedSeq = state.LastEventSeq
+			d.savedSeq, d.savedFirewall, d.savedGeneration = state.LastEventSeq, state.Firewall, d.core.generation
 			d.lastSave = now
 		}
 	}
 }
 
-// applyBlock writes the hosts of the blocked providers to the hosts file, if they changed.
-// After a failure, it tries again at each pass. It adds an error event only when the error changes.
+// applyBlock applies the block of the current state: the hosts file and the firewall rules.
 func (d *serviceDriver) applyBlock(now time.Time) {
-	hosts := getBlockedHosts(d.core.state.blockedProviders())
-	if d.isApplied && slices.Equal(hosts, d.appliedHosts) {
+	d.applyHosts(now)
+	d.applyFirewall(now)
+}
+
+// applyFirewall makes the firewall rules match the block of Anthropic. During a block, it does a quick check every second
+// and a full check every 5 seconds. After a failed removal, it tries again every 30 seconds.
+// The firewall keeps its own last error, so a check that fails again adds no new event and no new log line until the error changes.
+func (d *serviceDriver) applyFirewall(now time.Time) {
+	if d.firewall == nil {
 		return
 	}
+	state := &d.core.state.Firewall
+	isWanted := slices.Contains(d.core.state.blockedProviders(), geocheck.Anthropic)
+	isChange := !d.isFirewallKnown || isWanted != state.IsBlocked
+	sinceAttempt := now.Sub(d.lastFirewallAttempt)
+	isCheckDue := isWanted && sinceAttempt >= firewallCheckInterval
+	isRetryDue := !isWanted && state.Error != "" && sinceAttempt >= firewallRetryInterval
+	if !isChange && !isCheckDue && !isRetryDue {
+		return
+	}
+	d.isFirewallKnown, d.lastFirewallAttempt = true, now
+	start := time.Now()
+	var err error
+	switch {
+	case isWanted && isChange:
+		state.Token, err = d.firewall.Block(state.Token)
+		d.lastFirewallFullCheck = now
+		d.debugf("firewall", "block the ranges of Anthropic in %v: token %q, error: %v", time.Since(start).Round(time.Millisecond), state.Token, err)
+	case isWanted:
+		isFull := now.Sub(d.lastFirewallFullCheck) >= firewallFullCheckInterval
+		if isFull {
+			d.lastFirewallFullCheck = now
+		}
+		var isRepaired bool
+		state.Token, isRepaired, err = d.firewall.Check(state.Token, isFull)
+		if isRepaired || getFirewallMessage(err) != state.Error {
+			d.debugf("firewall", "check in %v: full %v, repaired %v, token %q, error: %v", time.Since(start).Round(time.Millisecond), isFull, isRepaired, state.Token, err)
+		}
+	default:
+		if err = d.firewall.Unblock(state.Token); err == nil {
+			state.Token = ""
+		}
+		d.debugf("firewall", "remove the rules in %v: error: %v", time.Since(start).Round(time.Millisecond), err)
+	}
+	state.IsBlocked = isWanted
+	message := getFirewallMessage(err)
+	if message != state.Error {
+		state.Error = message
+		if message != "" {
+			d.core.addError(now, message)
+		}
+	}
+}
+
+// startDNSFlush runs the flush of the DNS cache in another goroutine, after the write of the hosts file.
+// The flush talks to mDNSResponder, which can be slow during a change of the network. So the pass with the block does not wait for it,
+// and the pf rules apply at the same time. The result comes back to the loop for the log. If the channel is full, the log line goes.
+func (d *serviceDriver) startDNSFlush() {
+	d.runFlush(func() {
+		start := time.Now()
+		result := d.flushDNS()
+		select {
+		case d.results <- dnsFlushDone{Result: result, Duration: time.Since(start)}:
+		default:
+		}
+	})
+}
+
+// getFirewallMessage returns the text of the error for the state and the event, or an empty text without an error.
+func getFirewallMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	return "firewall: " + err.Error()
+}
+
+// applyHosts writes the hosts of the blocked providers to the hosts file, if they changed.
+// After a failure, it tries again at each pass. It adds an error event only when the error changes.
+func (d *serviceDriver) applyHosts(now time.Time) {
+	hosts := getBlockedHosts(d.core.state.blockedProviders())
+	stamp := d.hostsStamp()
+	isSame := d.isApplied && slices.Equal(hosts, d.appliedHosts)
+	if isSame && stamp == d.appliedStamp {
+		return
+	}
+	start := time.Now()
 	isChanged, err := d.writeHosts(hosts)
 	if err != nil {
 		d.debugf("hosts", "cannot write %d hosts: %v", len(hosts), err)
@@ -447,13 +600,23 @@ func (d *serviceDriver) applyBlock(now time.Time) {
 	}
 	d.lastHostsErr = ""
 	d.appliedHosts, d.isApplied = hosts, true
-	providers := getProviderNames(d.core.state.blockedProviders())
-	if providers == "" {
-		providers = "none"
+	// Read the stamp after the own write. Then the event of the own write finds the same stamp and writes nothing.
+	d.appliedStamp = d.hostsStamp()
+	switch {
+	case isSame && !isChanged:
+		// Another program changed other lines of the file. The block is still correct.
+		return
+	case isSame:
+		d.debugf("hosts", "another program changed the block in the file, so the service wrote it again in %v", time.Since(start).Round(time.Microsecond))
+	default:
+		providers := getProviderNames(d.core.state.blockedProviders())
+		if providers == "" {
+			providers = "none"
+		}
+		d.debugf("hosts", "blocked providers: %s (%d hosts). The file changed: %v. The write took %v", providers, len(hosts), isChanged, time.Since(start).Round(time.Microsecond))
 	}
-	d.debugf("hosts", "blocked providers: %s (%d hosts). The file changed: %v", providers, len(hosts), isChanged)
 	if isChanged {
-		d.debugf("dns", "flush: %s", d.flushDNS())
+		d.startDNSFlush()
 	}
 }
 
@@ -530,6 +693,11 @@ func runService(ctx context.Context, paths appPaths) error {
 	driver := newServiceDriver(ctx, c, paths, checkOptions)
 	db, dbErr := loadCountryDB(paths.Dir)
 	driver.setCountryDB(db)
+	// Only root can change pf. The real network test runs the service as a normal user.
+	if driver.firewall != nil && os.Geteuid() != 0 {
+		driver.firewall = nil
+		driver.debugf("firewall", "the service does not run as root, so it does not change the firewall")
+	}
 	driver.debugf("service", "start: process %d, services %s, minimum replies %d, blocked countries %v, last event %d, local database %s",
 		os.Getpid(), strings.Join(geocheck.ServiceNames(checkOptions.Services), ","), checkOptions.MinReplies, cfg.BlockedCountries, state.LastEventSeq, db.describe())
 	if dbErr != nil {
@@ -553,7 +721,11 @@ func runService(ctx context.Context, paths appPaths) error {
 	defer ticker.Stop()
 	networkChanges := watchNetwork(ctx)
 	driver.debugf("service", "network messages of the system: %v", networkChanges != nil)
-	driver.run(ticker.C, networkChanges)
+	hostsChanges := watchFiles(ctx, paths.Hosts)
+	driver.debugf("service", "watch of the hosts file: %v", hostsChanges != nil)
+	sleeps, wakes, err := watchSleep()
+	driver.debugf("service", "messages about sleep: %v, error: %v", sleeps != nil, err)
+	driver.run(loopInputs{ticks: ticker.C, networkChanges: networkChanges, fileChanges: hostsChanges, sleeps: sleeps, wakes: wakes})
 	driver.debugf("service", "stop")
 	return nil
 }

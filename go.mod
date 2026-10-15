@@ -9,6 +9,7 @@ require (
 )
 
 require (
+	github.com/ebitengine/purego v0.11.1 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/maxmind/mmdbwriter v1.2.0 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect

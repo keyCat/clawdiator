@@ -468,3 +468,48 @@ func TestUninstallWithServiceThatDoesNotStop(t *testing.T) {
 		t.Errorf("uninstall must continue after the failed step:\n%s", stdout.String())
 	}
 }
+
+// uninstall and hosts --remove remove the rules and release the token from state.json, also without the service.
+func TestUninstallAndRemoveBlockRemoveFirewall(t *testing.T) {
+	for _, command := range []string{"uninstall", "hosts --remove"} {
+		in, _, stdout := newTestInstaller(t, "yes\n")
+		if err := in.commandInstall(nil); err != nil {
+			t.Fatal(err)
+		}
+		pf := newFakePF()
+		in.firewall = &pfFirewall{run: pf.run}
+		token, err := in.firewall.Block("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := saveServiceState(in.paths.State, &serviceState{Firewall: firewallState{IsBlocked: true, Token: token}}); err != nil {
+			t.Fatal(err)
+		}
+		stdout.Reset()
+		want := "OK      remove the firewall rules and release the switch-on of pf"
+		if command == "uninstall" {
+			err = in.commandUninstall()
+		} else {
+			err, want = in.commandRemoveBlock(), "The firewall rules of the pf anchor com.apple/clawdiator are removed."
+		}
+		if err != nil || pf.anchor != "" || len(pf.tokens) != 0 || !strings.Contains(stdout.String(), want) {
+			t.Errorf("%s must remove the rules and release the token: %v, %+v\n%s", command, err, pf, stdout.String())
+		}
+	}
+}
+
+func TestCommandStatusFirewall(t *testing.T) {
+	in, _, _ := newTestInstaller(t, "")
+	for firewall, want := range map[firewallState]string{
+		{IsBlocked: true}: "Firewall: the address ranges of Anthropic are blocked.",
+		{IsBlocked: true, Error: "firewall: " + errFirewallNoEffect.Error()}: "CAUTION: the firewall has a problem: firewall: the main rule set of pf has no line anchor \"com.apple/*\", so the rules have no effect",
+	} {
+		if err := saveServiceState(in.paths.State, &serviceState{Heartbeat: testStart, Firewall: firewall}); err != nil {
+			t.Fatal(err)
+		}
+		var stdout bytes.Buffer
+		if err := commandStatus(in.paths, nil, testStart, &stdout); err != nil || !strings.Contains(stdout.String(), want) {
+			t.Errorf("the status must contain %q: %v\n%s", want, err, stdout.String())
+		}
+	}
+}

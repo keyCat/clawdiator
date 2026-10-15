@@ -39,6 +39,22 @@ func findAction(actions []action, kind actionKind) (action, bool) {
 	return action{}, false
 }
 
+// mustChangeNetwork changes the fingerprint at the time. The pre-block must start at once,
+// and the full check must start only after networkQuietDelay.
+func mustChangeNetwork(t *testing.T, c *core, now time.Time, fingerprint string) action {
+	t.Helper()
+	if _, isFound := findAction(c.tick(now, fingerprint), actionFullCheck); isFound {
+		t.Fatal("a change of the network must not start a full check before the quiet time")
+	}
+	if !c.state.IsPreBlocked && !c.state.Pause.IsOn {
+		t.Fatal("a change of the network must start the pre-block at once")
+	}
+	if _, isFound := findAction(c.tick(now.Add(networkQuietDelay-time.Millisecond), fingerprint), actionFullCheck); isFound {
+		t.Fatal("the full check must wait for the full quiet time")
+	}
+	return mustFindCheck(t, c.tick(now.Add(networkQuietDelay), fingerprint))
+}
+
 func mustFindCheck(t *testing.T, actions []action) action {
 	t.Helper()
 	check, isFound := findAction(actions, actionFullCheck)
@@ -56,7 +72,7 @@ func getEventKinds(state *serviceState) []eventKind {
 	return kinds
 }
 
-// simulation drives a core with 1 tick every 2 seconds, the same as the driver. It never skips a tick,
+// simulation drives a core with 1 tick every 250 milliseconds, the same as the driver. It never skips a tick,
 // because a gap of more than 30 seconds counts as a wake from sleep.
 type simulation struct {
 	t           *testing.T
@@ -82,7 +98,7 @@ func (s *simulation) getProbeLocations() []geocheck.Location {
 
 // newSimulation returns a simulation before its first tick. The first tick is at testStart.
 func newSimulation(t *testing.T) *simulation {
-	return &simulation{t: t, c: newCore(&serviceState{}, nil), now: testStart.Add(-2 * time.Second), fingerprint: "wifi", probe: germany}
+	return &simulation{t: t, c: newCore(&serviceState{}, nil), now: testStart.Add(-tickInterval), fingerprint: "wifi", probe: germany}
 }
 
 // newOpenSimulation returns a simulation after the first full check in Germany. The check ended at testStart plus 1 second.
@@ -102,7 +118,7 @@ func newOpenSimulation(t *testing.T) *simulation {
 func (s *simulation) runUntil(end time.Time) []action {
 	var checks []action
 	for s.now.Before(end) {
-		s.now = s.now.Add(2 * time.Second)
+		s.now = s.now.Add(tickInterval)
 		for _, next := range s.c.tick(s.now, s.fingerprint) {
 			if next.Kind == actionFullCheck {
 				checks = append(checks, next)
@@ -506,5 +522,26 @@ func TestProbeFillsRegionForLocalDB(t *testing.T) {
 	s.probeDB = geocheck.Location{Country: "UA", Source: dbSource}
 	if checks := s.runUntil(testStart.Add(2 * probeInterval)); len(checks) != 0 || len(s.c.state.blockedProviders()) != 0 {
 		t.Errorf("the opinion of the database in Kyiv must not block: %v, %v", checks, getEventKinds(s.c.state))
+	}
+}
+
+// During the quiet time after a change of the network, no other check starts: not the hourly check,
+// and not a second check after a probe started one.
+func TestQuietTimeStartsOnlyOneCheck(t *testing.T) {
+	c := newCore(&serviceState{}, nil)
+	first := mustFindCheck(t, c.tick(testStart, "wifi"))
+	c.handleCheck(testStart.Add(time.Second), first.Generation, newResult("DE", "DE"), nil)
+	// The last full check is 2 hours old, so the hourly check is due.
+	now := testStart.Add(2 * time.Hour)
+	c.lastTick = now.Add(-tickInterval)
+	mustChangeNetwork(t, c, now, "hotel")
+
+	c.tick(now.Add(time.Second), "hotel-2")
+	probeChecks := c.handleProbe(now.Add(time.Second+100*time.Millisecond), c.generation, []geocheck.Location{{Country: "PL", Source: probeServiceName}}, nil)
+	if _, isFound := findAction(probeChecks, actionFullCheck); !isFound {
+		t.Fatal("a probe in a new country must start a check")
+	}
+	if _, isFound := findAction(c.tick(now.Add(time.Second+networkQuietDelay), "hotel-2"), actionFullCheck); isFound {
+		t.Error("after a check of the probe, the end of the quiet time must start no second check")
 	}
 }

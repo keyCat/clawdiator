@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -126,6 +127,10 @@ func commandHosts(hostsPath string, args []string, stdout io.Writer, removeBlock
 	fmt.Fprintln(stdout, text(msgDryRunFlush))
 	for _, command := range getDNSFlushCommands(runtime.GOOS) {
 		fmt.Fprintln(stdout, "  "+strings.Join(command, " "))
+	}
+	if newFirewall() != nil && slices.Contains(providers, geocheck.Anthropic) {
+		fmt.Fprintln(stdout, text(msgDryRunFirewall, pfAnchor, anthropicRangesDate))
+		fmt.Fprint(stdout, "  "+renderPFRules())
 	}
 	return nil
 }

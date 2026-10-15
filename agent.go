@@ -22,6 +22,8 @@ const (
 	defaultPreBlockNoticeSeconds = 20
 	// heartbeatTimeout is the time without a change of the heartbeat after which the agent tells the user.
 	heartbeatTimeout = 2 * time.Minute
+	// agentWakeMargin allows a small difference between the wake of the service and the wake of the agent.
+	agentWakeMargin = 5 * time.Second
 	// agentInterval is the time between 2 reads of state.json by the agent and by the tray.
 	agentInterval = 2 * time.Second
 )
@@ -99,11 +101,17 @@ func saveAgentSettings(path string, settings agentSettings) error {
 type heartbeatWatcher struct {
 	value  time.Time
 	seenAt time.Time
+	// lastCall is the time of the last call. A gap of more than wakeGap shows a sleep of the computer.
+	lastCall time.Time
 }
 
 // isServiceDown takes the heartbeat of the last read of state.json. A zero heartbeat means that the read failed.
+// After a sleep of the computer, the service needs some time for its next save, so the clock of the watch starts again.
 func (w *heartbeatWatcher) isServiceDown(now, heartbeat time.Time) bool {
-	if w.seenAt.IsZero() || !heartbeat.Equal(w.value) {
+	now = now.Round(0)
+	isWake := !w.lastCall.IsZero() && now.Sub(w.lastCall) > wakeGap
+	w.lastCall = now
+	if w.seenAt.IsZero() || !heartbeat.Equal(w.value) || isWake {
 		w.value, w.seenAt = heartbeat, now
 		return false
 	}
@@ -126,6 +134,9 @@ type agentModel struct {
 	isPreBlockNotified  bool
 	heartbeat           heartbeatWatcher
 	isServiceDownWarned bool
+	// lastUpdate is the time of the last pass. A gap of more than wakeGap shows a wake of the computer at wakeTime.
+	lastUpdate time.Time
+	wakeTime   time.Time
 }
 
 func newAgentModel(settings agentSettings) *agentModel {
@@ -135,6 +146,11 @@ func newAgentModel(settings agentSettings) *agentModel {
 // update takes the last read of state.json and returns the notices to show. A nil state means that the read failed.
 // isFirstRun tells that the agent runs for the first time for this user. Then the first notice tells that clawdiator works.
 func (m *agentModel) update(now time.Time, state *serviceState, isFirstRun bool) []notice {
+	now = now.Round(0)
+	if !m.lastUpdate.IsZero() && now.Sub(m.lastUpdate) > wakeGap {
+		m.wakeTime = now
+	}
+	m.lastUpdate = now
 	var notices []notice
 	heartbeat := time.Time{}
 	if state != nil {
@@ -169,7 +185,10 @@ func (m *agentModel) update(now time.Time, state *serviceState, isFirstRun bool)
 		notices = append(notices, m.getEventNotices(change)...)
 	}
 	// With the setting "long", a pre-block gets a notice only after some seconds. A short pre-block after a wake gets none.
-	isLong := now.Sub(state.PreBlockSince) >= time.Duration(m.settings.PreBlockNoticeSeconds)*time.Second
+	// After a wake of the agent, the state can be from before the sleep. Then its pre-block looks long, but the service
+	// sets a new start of the pre-block at the wake. So the agent measures the length only after the service saved after the wake.
+	isFresh := !state.Heartbeat.Before(m.wakeTime.Add(-agentWakeMargin))
+	isLong := isFresh && now.Sub(state.PreBlockSince) >= time.Duration(m.settings.PreBlockNoticeSeconds)*time.Second
 	if state.IsPreBlocked && !state.Pause.IsOn && !m.isPreBlockNotified && m.settings.PreBlockNotices == preBlockNoticesLong && isLong {
 		m.isPreBlockNotified = true
 		notices = append(notices, notice{text(msgNoticePreBlock, joinProviderNames(geocheck.Providers()))})

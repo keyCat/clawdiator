@@ -31,6 +31,8 @@ type installer struct {
 	consoleUserID func() int
 	// downloadDB downloads the file of the local database for the month into the app folder.
 	downloadDB func(ctx context.Context, month string) (*countryDB, error)
+	// firewall controls the firewall rules. It is nil on the systems without these rules.
+	firewall *pfFirewall
 	// serviceStopTimeout is the maximum time to wait for the end of the service process.
 	// launchd sends SIGKILL 20 seconds after SIGTERM, so 30 seconds is enough.
 	serviceStopTimeout time.Duration
@@ -49,6 +51,7 @@ func newInstaller(paths appPaths) *installer {
 		flushDNS:           func() { _ = flushDNS() },
 		consoleUserID:      getConsoleUserID,
 		downloadDB:         newDBDownloader(paths.Dir),
+		firewall:           newFirewall(),
 		serviceStopTimeout: 30 * time.Second,
 		now:                time.Now,
 		user:               getUserName(),
@@ -244,6 +247,10 @@ func (in *installer) commandUninstall() error {
 	if in.paths.Plist != "" {
 		report(msgStepStopService, in.stopService())
 	}
+	// The token of the firewall is in state.json, so this step comes before the removal of the app folder.
+	if in.firewall != nil {
+		report(msgStepRemoveFirewall, in.removeFirewall())
+	}
 	isChanged, err := writeHostsFile(in.paths.Hosts, nil)
 	if isChanged {
 		in.flushDNS()
@@ -313,10 +320,27 @@ func (in *installer) commandRemoveBlock() error {
 	if isChanged {
 		in.flushDNS()
 		fmt.Fprintln(in.stdout, text(msgBlockRemoved, in.paths.Hosts))
+	} else {
+		fmt.Fprintln(in.stdout, text(msgNoBlock, in.paths.Hosts))
+	}
+	if in.firewall == nil {
 		return nil
 	}
-	fmt.Fprintln(in.stdout, text(msgNoBlock, in.paths.Hosts))
+	if err := in.removeFirewall(); err != nil {
+		return err
+	}
+	fmt.Fprintln(in.stdout, text(msgFirewallRemoved, pfAnchor))
 	return nil
+}
+
+// removeFirewall removes the firewall rules and releases the token from state.json. It works without the service.
+// Without state.json, it only removes the rules.
+func (in *installer) removeFirewall() error {
+	token := ""
+	if state, err := loadServiceState(in.paths.State); err == nil {
+		token = state.Firewall.Token
+	}
+	return in.firewall.Unblock(token)
 }
 
 // commandStatus shows the state of the service. It needs no administrator rights: it reads state.json and the logs.
@@ -370,6 +394,12 @@ func commandStatus(paths appPaths, args []string, now time.Time, stdout io.Write
 	}
 	if state.LastFailure.Error != "" {
 		fmt.Fprintln(stdout, text(msgStatusLastFailure, formatTime(state.LastFailure.Time), state.LastFailure.Error))
+	}
+	switch {
+	case state.Firewall.Error != "":
+		fmt.Fprintln(stdout, text(msgStatusFirewallError, state.Firewall.Error))
+	case state.Firewall.IsBlocked:
+		fmt.Fprintln(stdout, text(msgStatusFirewallOn))
 	}
 	switch db := state.LocalDB; {
 	case db.File == "":

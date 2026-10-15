@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -140,4 +141,15 @@ func getDNSFlushCommands(goos string) [][]string {
 		return [][]string{{"ipconfig", "/flushdns"}}
 	}
 	return nil
+}
+
+// getFileStamp returns a text that changes with each write of the file: the size and the time of the last change in nanoseconds.
+// The service compares it with the stamp after its own write, so it finds a change of the hosts file by another program.
+// An error gives an empty text.
+func getFileStamp(path string) string {
+	info, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UnixNano())
 }

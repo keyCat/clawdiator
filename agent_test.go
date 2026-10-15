@@ -62,8 +62,11 @@ func TestHeartbeatWatcher(t *testing.T) {
 	if watcher.isServiceDown(testStart, beat) {
 		t.Error("the first value must not count as down")
 	}
-	if watcher.isServiceDown(testStart.Add(heartbeatTimeout-time.Second), beat) {
-		t.Error("the same value for less than 2 minutes must not count as down")
+	// The agent reads the state every 2 seconds. A step of 10 seconds is shorter than a wake gap.
+	for elapsed := 10 * time.Second; elapsed < heartbeatTimeout; elapsed += 10 * time.Second {
+		if watcher.isServiceDown(testStart.Add(elapsed), beat) {
+			t.Fatalf("the same value for %v must not count as down", elapsed)
+		}
 	}
 	if !watcher.isServiceDown(testStart.Add(heartbeatTimeout), beat) {
 		t.Error("the same value for 2 minutes must count as down")
@@ -78,6 +81,20 @@ func TestHeartbeatWatcher(t *testing.T) {
 	}
 	if afterSleep.isServiceDown(testStart.Add(8*time.Hour+2*time.Second), testStart) {
 		t.Error("the same old value 2 seconds later must not count as down: the age of the value does not count")
+	}
+
+	// The agent sleeps with the computer. After the wake, the service needs some time for its next save.
+	var sleeper heartbeatWatcher
+	sleeper.isServiceDown(testStart, beat)
+	if sleeper.isServiceDown(testStart.Add(time.Hour), beat) {
+		t.Error("the first read after a sleep must not count as down")
+	}
+	// The clock started again at the wake, so 2 more minutes without a new value count as down.
+	for elapsed := 10 * time.Second; elapsed < heartbeatTimeout; elapsed += 10 * time.Second {
+		sleeper.isServiceDown(testStart.Add(time.Hour+elapsed), beat)
+	}
+	if !sleeper.isServiceDown(testStart.Add(time.Hour+heartbeatTimeout), beat) {
+		t.Error("2 minutes after the wake without a new value must count as down")
 	}
 }
 
@@ -105,13 +122,13 @@ func TestAgentLoginNotices(t *testing.T) {
 
 func TestAgentBlockAndUnblock(t *testing.T) {
 	run := newAgentRun(t, agentSettings{})
-	check := mustFindCheck(t, run.core.tick(run.now, "hotel"))
+	check := mustChangeNetwork(t, run.core, run.now, "hotel")
 	run.core.handleCheck(run.now, check.Generation, newResult("AF", "AF"), nil)
 	got := run.update()
 	if !slices.Equal(got, []string{"Anthropic is blocked. Country: AF."}) {
 		t.Fatalf("a block must give 1 notice, and a short pre-block none: %v", got)
 	}
-	check = mustFindCheck(t, run.core.tick(run.now, "home"))
+	check = mustChangeNetwork(t, run.core, run.now, "home")
 	run.core.handleCheck(run.now, check.Generation, newResult("DE"), nil)
 	if got := run.update(); !slices.Equal(got, []string{"Anthropic is available again. Country: DE."}) {
 		t.Errorf("an unblock after a block notice must give 1 notice: %v", got)
@@ -120,7 +137,7 @@ func TestAgentBlockAndUnblock(t *testing.T) {
 
 func TestAgentShortPreBlockGivesNoNotice(t *testing.T) {
 	run := newAgentRun(t, agentSettings{})
-	check := mustFindCheck(t, run.core.tick(run.now, "hotel"))
+	check := mustChangeNetwork(t, run.core, run.now, "hotel")
 	if got := run.update(); len(got) != 0 {
 		t.Errorf("a pre-block must give no notice at once with the setting long: %v", got)
 	}
@@ -132,7 +149,7 @@ func TestAgentShortPreBlockGivesNoNotice(t *testing.T) {
 
 func TestAgentLongPreBlock(t *testing.T) {
 	run := newAgentRun(t, agentSettings{})
-	check := mustFindCheck(t, run.core.tick(run.now, "hotel"))
+	check := mustChangeNetwork(t, run.core, run.now, "hotel")
 	var notices []string
 	for index := 0; index < 11; index++ {
 		notices = append(notices, run.update()...)
@@ -148,7 +165,7 @@ func TestAgentLongPreBlock(t *testing.T) {
 
 func TestAgentPreBlockWithSettingAll(t *testing.T) {
 	run := newAgentRun(t, agentSettings{PreBlockNotices: preBlockNoticesAll})
-	check := mustFindCheck(t, run.core.tick(run.now, "hotel"))
+	check := mustChangeNetwork(t, run.core, run.now, "hotel")
 	if got := run.update(); !slices.Equal(got, []string{"Anthropic and OpenAI are blocked until the country check ends."}) {
 		t.Errorf("with the setting all, a pre-block must give a notice at once: %v", got)
 	}
@@ -161,7 +178,7 @@ func TestAgentPreBlockWithSettingAll(t *testing.T) {
 // A pre-block that ends in a block must not say that the providers are available again.
 func TestAgentPreBlockEndsInBlock(t *testing.T) {
 	run := newAgentRun(t, agentSettings{PreBlockNotices: preBlockNoticesAll})
-	check := mustFindCheck(t, run.core.tick(run.now, "hotel"))
+	check := mustChangeNetwork(t, run.core, run.now, "hotel")
 	run.update()
 	run.core.handleCheck(run.now, check.Generation, newResult("AF"), nil)
 	if got := run.update(); !slices.Equal(got, []string{"Anthropic is blocked. Country: AF.", "OpenAI is available again."}) {
@@ -176,7 +193,7 @@ func TestAgentPauseNotices(t *testing.T) {
 	if got := run.update(); !slices.Equal(got, []string{"The block is paused until 18:00, 2026-10-14."}) {
 		t.Errorf("a pause must give 1 notice: %v", got)
 	}
-	check := mustFindCheck(t, run.core.tick(run.now, "hotel"))
+	check := mustChangeNetwork(t, run.core, run.now, "hotel")
 	run.core.handleCheck(run.now, check.Generation, newResult("CN"), nil)
 	if got := run.update(); !slices.Equal(got, []string{"Anthropic and OpenAI: not available in CN. The pause is on."}) {
 		t.Errorf("a verdict change during a pause must give 1 notice: %v", got)
@@ -268,7 +285,7 @@ func TestQuoteFunctions(t *testing.T) {
 func TestAgentUnblockOnlyAfterKnownBlock(t *testing.T) {
 	run := newAgentRun(t, agentSettings{})
 	run.state.provider(geocheck.Anthropic).IsBlocked = true
-	check := mustFindCheck(t, run.core.tick(run.now, "home"))
+	check := mustChangeNetwork(t, run.core, run.now, "home")
 	run.core.handleCheck(run.now, check.Generation, newResult("DE"), nil)
 	if kinds := getEventKinds(run.state); !slices.Contains(kinds, eventUnblock) {
 		t.Fatalf("the setup must give an unblock event: %v", kinds)

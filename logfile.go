@@ -60,6 +60,9 @@ func formatEventLogWith(change event, timeFormat string) []string {
 		}
 		return lines
 	case eventPreBlock:
+		if change.Cause == preBlockCauseSleep {
+			return []string{stamp + " all pre-block the computer goes to sleep, so the block stays until a full check after the wake passes"}
+		}
 		return []string{stamp + " all pre-block the network changed, so the block stays until a full check passes"}
 	case eventPreBlockEnd:
 		return []string{stamp + " all pre-block-end the full check passed"}

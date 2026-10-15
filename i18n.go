@@ -119,6 +119,11 @@ const (
 	msgStepRemoveSockets
 	msgStepRemoveFolder
 	msgStepRemoveUserFiles
+	msgStepRemoveFirewall
+	msgFirewallRemoved
+	msgStatusFirewallOn
+	msgStatusFirewallError
+	msgDryRunFirewall
 	msgUserFolderKept
 	msgUserFolderNotRemoved
 	msgUninstallIncomplete
@@ -290,7 +295,8 @@ The local country database: ` + dbCredit + `, license CC BY 4.0.
 Read what the service does:
 
   1. It changes the hosts file. In an unsupported country, the sites of Anthropic and OpenAI do not open
-     in any program.
+     in any program. During a block, it also turns on the firewall of macOS and blocks the addresses
+     of Anthropic.
   2. Every 30 seconds, it sends a request to Cloudflare. At each full check, it also sends a request
      to the location services. Each service sees your public IP address.
      Each month, it downloads the country database of DB-IP from db-ip.com.
@@ -303,7 +309,8 @@ Type "yes" to agree: `,
 Прочитайте, что делает служба:
 
   1. Она изменяет файл hosts. В неподдерживаемой стране сайты Anthropic и OpenAI не открываются
-     ни в одной программе.
+     ни в одной программе. Во время блокировки она также включает брандмауэр macOS и блокирует адреса
+     Anthropic.
   2. Каждые 30 секунд она отправляет запрос в Cloudflare. При каждой полной проверке она также отправляет
      запрос сервисам местоположения. Каждый сервис видит ваш публичный IP-адрес.
      Каждый месяц она скачивает базу стран DB-IP с сайта db-ip.com.
@@ -327,14 +334,20 @@ Type "yes" to agree: `,
 	msgLinkIsFile:     {"%s exists and is not a link, so the tool did not replace it", "%s существует и не является ссылкой, поэтому программа не заменила его"},
 	msgBlockedCountriesActive: {"CAUTION: blocked_countries has %s. The service blocks the providers in these countries.",
 		"ВНИМАНИЕ: в blocked_countries есть %s. Служба блокирует провайдеров в этих странах."},
-	msgHintStatus:        {`Run "clawdiator status" to see the state.`, `Выполните "clawdiator status", чтобы увидеть состояние.`},
-	msgStepDone:          {"OK      %s", "ГОТОВО  %s"},
-	msgStepFailed:        {"FAILED  %s: %v", "ОШИБКА  %s: %v"},
-	msgStepStopService:   {"stop and remove the service", "остановить и удалить службу"},
-	msgStepRemoveBlock:   {"remove the block from the hosts file", "удалить блокировку из файла hosts"},
-	msgStepRemoveLink:    {"remove the link of the command", "удалить ссылку команды"},
-	msgStepRemoveSockets: {"remove the sockets", "удалить сокеты"},
-	msgStepRemoveFolder:  {"remove the app folder", "удалить папку приложения"},
+	msgHintStatus:          {`Run "clawdiator status" to see the state.`, `Выполните "clawdiator status", чтобы увидеть состояние.`},
+	msgStepDone:            {"OK      %s", "ГОТОВО  %s"},
+	msgStepFailed:          {"FAILED  %s: %v", "ОШИБКА  %s: %v"},
+	msgStepStopService:     {"stop and remove the service", "остановить и удалить службу"},
+	msgStepRemoveBlock:     {"remove the block from the hosts file", "удалить блокировку из файла hosts"},
+	msgStepRemoveLink:      {"remove the link of the command", "удалить ссылку команды"},
+	msgStepRemoveSockets:   {"remove the sockets", "удалить сокеты"},
+	msgStepRemoveFolder:    {"remove the app folder", "удалить папку приложения"},
+	msgStepRemoveFirewall:  {"remove the firewall rules and release the switch-on of pf", "удалить правила брандмауэра и освободить включение pf"},
+	msgFirewallRemoved:     {"The firewall rules of the pf anchor %s are removed.", "Правила брандмауэра в якоре pf %s удалены."},
+	msgStatusFirewallOn:    {"Firewall: the address ranges of Anthropic are blocked.", "Брандмауэр: диапазоны адресов Anthropic заблокированы."},
+	msgStatusFirewallError: {"CAUTION: the firewall has a problem: %s", "ВНИМАНИЕ: у брандмауэра проблема: %s"},
+	msgDryRunFirewall: {"During a block of Anthropic, the service also loads this rule into the pf anchor %s (ranges from %s):",
+		"Во время блокировки Anthropic служба также загружает это правило в якорь pf %s (диапазоны от %s):"},
 	msgStepRemoveUserFiles: {"remove the files of the notices in the home folders of the users",
 		"удалить файлы уведомлений в домашних папках пользователей"},
 	msgUserFolderKept: {"        %s has other files, so the tool kept the folder. Remove it manually if you do not need the files.",

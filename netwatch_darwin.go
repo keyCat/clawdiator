@@ -6,9 +6,10 @@ import (
 	"time"
 )
 
-// watchNetwork returns a channel that gets a value soon after a change of an interface or of an address.
+// watchNetwork returns a channel that gets a value at once after a change of an interface or of an address.
 // It reads the messages of a route socket. The socket needs no administrator rights.
-// If the socket does not open, the result is nil, and the 2-second poll of the service does the work.
+// The channel has a buffer of 1, so a burst of messages gives at most 2 passes. The core waits for quiet before the full check.
+// If the socket does not open, the result is nil, and the tick of the service does the work.
 func watchNetwork(ctx context.Context) <-chan struct{} {
 	socket, err := syscall.Socket(syscall.AF_ROUTE, syscall.SOCK_RAW, syscall.AF_UNSPEC)
 	if err != nil {
@@ -32,7 +33,7 @@ func watchNetwork(ctx context.Context) <-chan struct{} {
 			}
 		}
 	}()
-	return debounceEvents(ctx, messages, networkEventDelay)
+	return messages
 }
 
 // isInterfaceMessage tells if the route message is about an interface or an address.

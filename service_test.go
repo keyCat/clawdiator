@@ -12,6 +12,10 @@ import (
 	"geocheck"
 )
 
+// testStep is the time of 1 step of the test driver. It is longer than tickInterval, because each step waits
+// for the results of the probes. The core and the driver use time differences, so the length of a step does not change the logic.
+const testStep = 2 * time.Second
+
 // fakeNetwork replaces the lookups of the driver. Probes reply at once. Each full check waits for the test.
 type fakeNetwork struct {
 	probe geocheck.Location
@@ -61,7 +65,10 @@ type testDriver struct {
 	network     *fakeNetwork
 	hostsWrites [][]string
 	hostsErr    error
-	flushes     int
+	// hostsFileStamp is the stamp of the fake hosts file. isHostsTampered makes the next write report a change.
+	hostsFileStamp  string
+	isHostsTampered bool
+	flushes         int
 	// checkResults keeps the results of full checks that arrived during a step.
 	checkResults []checkDone
 	// stop ends the context of the driver, so that a running loop stops.
@@ -85,13 +92,22 @@ func newTestDriver(t *testing.T) *testDriver {
 		if td.hostsErr != nil {
 			return false, td.hostsErr
 		}
-		isChanged := len(td.hostsWrites) == 0 || !slices.Equal(td.hostsWrites[len(td.hostsWrites)-1], hosts)
+		isChanged := len(td.hostsWrites) == 0 || !slices.Equal(td.hostsWrites[len(td.hostsWrites)-1], hosts) || td.isHostsTampered
+		td.isHostsTampered = false
+		// A real write changes the stamp of the file, so the fake write does it too.
+		td.hostsFileStamp += "w"
 		td.hostsWrites = append(td.hostsWrites, hosts)
 		return isChanged, nil
 	}
 	td.flushDNS = func() string { td.flushes++; return "ok" }
+	// The flush runs in the goroutine of the test, so the test can count the flushes without a race.
+	td.runFlush = func(task func()) { task() }
+	// The tests never read the real hosts file. A test sets a new stamp to show a change by another program.
+	td.hostsStamp = func() string { return td.hostsFileStamp }
 	// The tests never use the network. A test of the local database replaces this function.
 	td.downloadDB = func(context.Context, string) (*countryDB, error) { return nil, errOffline }
+	// The tests never change pf. A test of the firewall sets a fake pfctl.
+	td.firewall = nil
 	if err := os.MkdirAll(td.paths.Dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +129,7 @@ func (td *testDriver) step() {
 	}
 	td.drainProbes()
 	td.afterStep(false)
-	td.clock = td.clock.Add(tickInterval)
+	td.clock = td.clock.Add(testStep)
 }
 
 // drainProbes handles the probe results. It keeps the results of full checks for the test.
@@ -130,6 +146,24 @@ func (td *testDriver) drainProbes() {
 			return
 		}
 	}
+}
+
+// changeNetwork changes the fingerprint. The pre-block must start at the next step,
+// and the full check must start only at the step after it, when the network is quiet.
+func (td *testDriver) changeNetwork(fingerprint string) *fakeCheck {
+	td.t.Helper()
+	td.fingerprint = fingerprint
+	td.step()
+	if !td.core.state.IsPreBlocked && !td.core.state.Pause.IsOn {
+		td.t.Fatal("a change of the network must start the pre-block at once")
+	}
+	select {
+	case early := <-td.network.checks:
+		td.t.Fatalf("the full check must wait until the network is quiet: %+v", early.options)
+	default:
+	}
+	td.step()
+	return td.nextCheck()
 }
 
 func (td *testDriver) nextCheck() *fakeCheck {
@@ -195,9 +229,7 @@ func TestDriverNewNetworkStopsOldFullCheck(t *testing.T) {
 	td := newTestDriver(t)
 	td.step()
 	old := td.nextCheck()
-	td.fingerprint = "hotel"
-	td.step()
-	current := td.nextCheck()
+	current := td.changeNetwork("hotel")
 	select {
 	case <-old.ctx.Done():
 	case <-time.After(time.Second):
@@ -351,12 +383,8 @@ func TestDriverLogsFailedCheck(t *testing.T) {
 	}
 
 	// A stopped check of an older generation is not a failure.
-	td.fingerprint = "hotel"
-	td.step()
-	old := td.nextCheck()
-	td.fingerprint = "hotel-2"
-	td.step()
-	td.nextCheck()
+	old := td.changeNetwork("hotel")
+	td.changeNetwork("hotel-2")
 	<-old.ctx.Done()
 	td.handleResult(td.waitCheckResult())
 	log, _ = os.ReadFile(td.paths.Log)
@@ -385,7 +413,7 @@ func TestDriverVerboseLog(t *testing.T) {
 		"check start generation 1, 1 rounds, reason: service start",
 		"hosts blocked providers: Anthropic, OpenAI (41 hosts). The file changed: true",
 		"2026-10-14T09:00:00.000Z all pre-block the network changed",
-		"dns flush: ok",
+		"dns flush in",
 		"probe generation 1 in",
 		"cloudflare: DE",
 		"check generation 1 failed in",
@@ -439,7 +467,7 @@ func TestDriverUsesLocalDB(t *testing.T) {
 	// The same address moves to China in the new file of the database. The next probe blocks at once, without a pre-block.
 	td.network.probe.IP = "203.0.113.9"
 	td.core.state.PublicIP = td.network.probe.IP
-	for range probeInterval / tickInterval {
+	for range probeInterval / testStep {
 		td.step()
 	}
 	if !slices.Equal(td.core.state.blockedProviders(), geocheck.Providers()) || td.core.state.IsPreBlocked ||
@@ -656,5 +684,238 @@ func TestCoreIgnoresOldDBBlock(t *testing.T) {
 	s.c.handleDBBlock(s.now, check.Generation, geocheck.Location{Country: "AF", Source: dbSource})
 	if got := s.c.state.blockedProviders(); !slices.Equal(got, []geocheck.Provider{geocheck.Anthropic}) {
 		t.Errorf("Afghanistan must block only Anthropic: %v", got)
+	}
+}
+
+// The firewall rules follow the block of Anthropic. The token is on the disk at once, so a crash cannot lose it.
+func TestDriverFirewall(t *testing.T) {
+	td := newTestDriver(t)
+	pf := newFakePF()
+	td.firewall = &pfFirewall{run: pf.run}
+	td.step()
+	if !td.core.state.Firewall.IsBlocked || len(pf.tokens) != 1 || !hasPFRules(pf.anchor) {
+		t.Fatalf("the pre-block must turn the rules on: %+v, %+v", td.core.state.Firewall, pf)
+	}
+	if saved, err := loadServiceState(td.paths.State); err != nil || saved.Firewall.Token != pf.tokens[0] {
+		t.Errorf("the token must be on the disk at once: %+v, %v", saved, err)
+	}
+	td.nextCheck().reply <- newResult("DE", "DE", "DE")
+	td.handleResult(td.waitCheckResult())
+	td.afterStep(false)
+	if td.core.state.Firewall.IsBlocked || td.core.state.Firewall.Token != "" || pf.anchor != "" || len(pf.tokens) != 0 || pf.isEnabled {
+		t.Errorf("an allowed country must remove the rules and release the token: %+v, %+v", td.core.state.Firewall, pf)
+	}
+	if saved, _ := loadServiceState(td.paths.State); saved.Firewall.Token != "" {
+		t.Errorf("the released token must leave the disk at once: %+v", saved.Firewall)
+	}
+	log, _ := os.ReadFile(td.paths.DebugLog)
+	if !strings.Contains(string(log), "firewall block the ranges of Anthropic in") || !strings.Contains(string(log), "firewall remove the rules in") {
+		t.Errorf("the verbose log must show the changes of the firewall:\n%s", log)
+	}
+}
+
+func TestDriverFirewallCheckAndErrors(t *testing.T) {
+	td := newTestDriver(t)
+	pf := newFakePF()
+	td.firewall = &pfFirewall{run: pf.run}
+	td.step()
+	td.nextCheck().reply <- newResult("CN", "CN", "CN")
+	td.handleResult(td.waitCheckResult())
+	td.afterStep(false)
+	token := td.core.state.Firewall.Token
+
+	// Other software removes the rules. The quick check of the next second loads them again.
+	// The first step runs at the time of the last check, so the check comes at the second step.
+	pf.anchor = ""
+	td.step()
+	td.step()
+	if !hasPFRules(pf.anchor) || td.core.state.Firewall.Token != token {
+		t.Errorf("the check must load the rules again and keep the token: %+v", pf)
+	}
+
+	// A check that fails every second adds only 1 error event, and only 1 log line.
+	pf.anchor, pf.failOn = "", "-a com.apple/clawdiator -f -"
+	for range 10 {
+		td.step()
+	}
+	errorEvents := 0
+	for _, change := range td.core.state.Events {
+		if change.Kind == eventError && strings.HasPrefix(change.Error, "firewall: ") {
+			errorEvents++
+		}
+	}
+	if errorEvents != 1 || !strings.Contains(td.core.state.Firewall.Error, "Operation not permitted") {
+		t.Errorf("the same error must add 1 event, not %d: %+v", errorEvents, td.core.state.Firewall)
+	}
+	log, _ := os.ReadFile(td.paths.DebugLog)
+	checkLines := 0
+	for _, line := range strings.Split(string(log), "\n") {
+		if strings.Contains(line, "firewall check in") && strings.Contains(line, "Operation not permitted") {
+			checkLines++
+		}
+	}
+	if checkLines != 1 {
+		t.Errorf("the same error must add 1 line of the check to the verbose log, not %d:\n%s", checkLines, log)
+	}
+	pf.failOn = ""
+	td.step()
+	td.step()
+	if td.core.state.Firewall.Error != "" || !hasPFRules(pf.anchor) {
+		t.Errorf("a passed check must clear the error: %+v", td.core.state.Firewall)
+	}
+
+	// pfctl -d turns pf off, and pf forgets the reference. The check takes a new token without an event.
+	// The new token must be on the disk at once, not at the next save of the heartbeat.
+	pf.isEnabled, pf.tokens = false, nil
+	td.lastFirewallAttempt, td.lastSave = time.Time{}, td.clock
+	td.step()
+	if saved, _ := loadServiceState(td.paths.State); len(pf.tokens) != 1 || saved.Firewall.Token != pf.tokens[0] {
+		t.Errorf("the new token must be on the disk at once: %v, %+v", pf.tokens, saved.Firewall)
+	}
+
+	// A pause removes the rules.
+	td.handleRequest(commandRequest{Command: socketPause, IsForever: true, User: "ivan"})
+	td.afterStep(false)
+	if pf.anchor != "" || len(pf.tokens) != 0 {
+		t.Errorf("a pause must remove the rules and release the token: %+v", pf)
+	}
+}
+
+// A new process of the service takes over the token of the old process. pf then still has exactly 1 token of clawdiator.
+func TestDriverFirewallTakesOverToken(t *testing.T) {
+	pf := newFakePF()
+	first := newTestDriver(t)
+	first.firewall = &pfFirewall{run: pf.run}
+	first.step()
+	saved, err := loadServiceState(first.paths.State)
+	if err != nil || saved.Firewall.Token == "" {
+		t.Fatalf("the first process must save its token: %+v, %v", saved, err)
+	}
+	second := newTestDriver(t)
+	second.firewall = &pfFirewall{run: pf.run}
+	second.core.state.Firewall = saved.Firewall
+	second.step()
+	if len(pf.tokens) != 1 || second.core.state.Firewall.Token != saved.Firewall.Token || pf.countCalls("-E") != 1 {
+		t.Errorf("the second process must take over the token: %v, %+v", pf.tokens, second.core.state.Firewall)
+	}
+}
+
+// Another program can change the hosts file. A new stamp makes the service check the block at once.
+// If the block changed, the service writes it again and flushes the DNS cache. A change of other lines needs no flush.
+func TestDriverRepairsHostsFile(t *testing.T) {
+	td := newTestDriver(t)
+	td.hostsFileStamp = "1"
+	td.step()
+	writes, flushes := len(td.hostsWrites), td.flushes
+	td.afterStep(false)
+	if len(td.hostsWrites) != writes {
+		t.Fatalf("the same stamp must give no write: %d", len(td.hostsWrites))
+	}
+
+	// Another program removes the block.
+	td.hostsFileStamp, td.isHostsTampered = "2", true
+	td.afterStep(false)
+	if len(td.hostsWrites) != writes+1 || td.flushes != flushes+1 {
+		t.Errorf("a removed block must come back with a flush: %d writes, %d flushes", len(td.hostsWrites), td.flushes)
+	}
+	log, _ := os.ReadFile(td.paths.DebugLog)
+	if !strings.Contains(string(log), "another program changed the block in the file, so the service wrote it again in") {
+		t.Errorf("the verbose log must show the repair:\n%s", log)
+	}
+
+	// Another program changes other lines. The block is still correct.
+	td.hostsFileStamp = "3"
+	td.afterStep(false)
+	if len(td.hostsWrites) != writes+2 || td.flushes != flushes+1 {
+		t.Errorf("a change of other lines must give a check, but no flush: %d writes, %d flushes", len(td.hostsWrites), td.flushes)
+	}
+	td.afterStep(false)
+	if len(td.hostsWrites) != writes+2 {
+		t.Errorf("after the check, the same stamp must give no write: %d", len(td.hostsWrites))
+	}
+	log, _ = os.ReadFile(td.paths.DebugLog)
+	if count := strings.Count(string(log), "another program changed the block"); count != 1 {
+		t.Errorf("only the removed block is a repair, not the change of other lines: %d lines", count)
+	}
+}
+
+// A failed removal of the rules gets a new try only every 30 seconds, not at each quick check.
+func TestDriverFirewallRetriesRemovalSlowly(t *testing.T) {
+	td := newTestDriver(t)
+	pf := newFakePF()
+	td.firewall = &pfFirewall{run: pf.run}
+	td.step()
+	pf.failOn = "-F rules"
+	td.nextCheck().reply <- newResult("DE", "DE", "DE")
+	td.handleResult(td.waitCheckResult())
+	td.afterStep(false)
+	for range 10 {
+		td.step()
+	}
+	if count := pf.countCalls("-a com.apple/clawdiator -F rules"); count != 1 {
+		t.Errorf("a failed removal must wait %v before the next try, not %d tries in 20 seconds", firewallRetryInterval, count)
+	}
+	for range 6 {
+		td.step()
+	}
+	if count := pf.countCalls("-a com.apple/clawdiator -F rules"); count != 2 {
+		t.Errorf("after %v, the removal must get 1 new try: %d", firewallRetryInterval, count)
+	}
+}
+
+// During a block, a quick check runs every second and a full check every 5 seconds. Only a full check reads the token.
+func TestDriverFirewallQuickAndFullChecks(t *testing.T) {
+	td := newTestDriver(t)
+	pf := newFakePF()
+	td.firewall = &pfFirewall{run: pf.run}
+	td.step()
+	td.nextCheck().reply <- newResult("CN", "CN", "CN")
+	td.handleResult(td.waitCheckResult())
+	td.afterStep(false)
+	pf.calls = nil
+	for range 10 {
+		td.step()
+	}
+	checks, fullChecks := pf.countCalls("-s info"), pf.countCalls("-s References")
+	if checks < 9 || fullChecks < 3 || fullChecks > 5 {
+		t.Errorf("in 20 seconds, each step must give a quick check, and about each third step a full check: %d checks, %d full checks", checks, fullChecks)
+	}
+}
+
+// The DNS flush talks to mDNSResponder, which can be slow during a change of the network. The pass with the block must not wait for it.
+func TestDriverDoesNotWaitForDNSFlush(t *testing.T) {
+	td := newTestDriver(t)
+	isFlushed := make(chan struct{})
+	td.flushDNS = func() string {
+		time.Sleep(300 * time.Millisecond)
+		close(isFlushed)
+		return "ok"
+	}
+	td.runFlush = func(task func()) { go task() }
+	start := time.Now()
+	td.handleTick()
+	td.afterStep(false)
+	if elapsed := time.Since(start); elapsed > 150*time.Millisecond {
+		t.Errorf("the pass with the block must not wait for the flush: %v", elapsed)
+	}
+	select {
+	case <-isFlushed:
+	case <-time.After(time.Second):
+		t.Fatal("the flush must run after the write of the hosts file")
+	}
+	// The probe of the pass can send its result first, so read the results until the result of the flush comes.
+	for isFlushLogged := false; !isFlushLogged; {
+		select {
+		case result := <-td.results:
+			_, isFlushLogged = result.(dnsFlushDone)
+			if isFlushLogged {
+				td.handleResult(result)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("the result of the flush must come back to the loop")
+		}
+	}
+	if log, _ := os.ReadFile(td.paths.DebugLog); !strings.Contains(string(log), "dns flush in 3") {
+		t.Errorf("the verbose log must show the time of the flush:\n%s", log)
 	}
 }
