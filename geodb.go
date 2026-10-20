@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"geocheck"
+	"clawdiator/internal/geocheck"
 	"github.com/oschwald/maxminddb-golang/v2"
 )
 

@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"geocheck"
+	"clawdiator/internal/geocheck"
 )
 
 // installer holds the parts of the installation that the tests replace.

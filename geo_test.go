@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"geocheck"
+	"clawdiator/internal/geocheck"
 )
 
 func TestAddProbeService(t *testing.T) {

@@ -1,6 +1,6 @@
 package main
 
-import "geocheck"
+import "clawdiator/internal/geocheck"
 
 // hostListDate is the date of the snapshot of the host lists.
 // The hosts file has no wildcards, so the lists must name each host. To update a list, change the hosts and the date.

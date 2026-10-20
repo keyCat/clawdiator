@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"geocheck"
+	"clawdiator/internal/geocheck"
 )
 
 // eventKind is the type of an event in state.json. The agent shows a notice for some kinds.

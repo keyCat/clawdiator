@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"geocheck"
+	"clawdiator/internal/geocheck"
 )
 
 // consentVersion is the version of the consent text. Increase it when the text changes. Then install asks again.

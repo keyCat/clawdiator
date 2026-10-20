@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"geocheck"
+	"clawdiator/internal/geocheck"
 )
 
 // testStep is the time of 1 step of the test driver. It is longer than tickInterval, because each step waits

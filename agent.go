@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"geocheck"
+	"clawdiator/internal/geocheck"
 )
 
 const (

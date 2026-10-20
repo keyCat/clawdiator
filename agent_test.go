@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"geocheck"
+	"clawdiator/internal/geocheck"
 )
 
 // agentRun drives an agent model with a state that the test changes, the same as the service.

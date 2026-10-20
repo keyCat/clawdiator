@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"geocheck"
+	"clawdiator/internal/geocheck"
 )
 
 // A message about a change of the network must start a pass at once, without a wait for the next tick.

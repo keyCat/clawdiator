@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"geocheck"
+	"clawdiator/internal/geocheck"
 )
 
 const sampleHosts = "##\n# Host Database\n##\n127.0.0.1\tlocalhost\n255.255.255.255\tbroadcasthost\n::1             localhost\n"

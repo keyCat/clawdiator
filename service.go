@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"geocheck"
+	"clawdiator/internal/geocheck"
 )
 
 const (

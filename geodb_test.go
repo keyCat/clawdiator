@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"geocheck"
+	"clawdiator/internal/geocheck"
 	"github.com/maxmind/mmdbwriter"
 	"github.com/maxmind/mmdbwriter/mmdbtype"
 )

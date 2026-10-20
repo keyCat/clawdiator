@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"geocheck"
+	"clawdiator/internal/geocheck"
 )
 
 var testStart = time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC)

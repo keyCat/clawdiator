@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"geocheck"
+	"clawdiator/internal/geocheck"
 )
 
 // Before a sleep, the core blocks. A check before the wake must not remove the block,

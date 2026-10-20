@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"testing"
 
-	"geocheck"
+	"clawdiator/internal/geocheck"
 )
 
 func TestServiceStateRoundTrip(t *testing.T) {

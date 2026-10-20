@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"geocheck"
+	"clawdiator/internal/geocheck"
 )
 
 // These constants set the times, the retries and the number of lookups of the core.

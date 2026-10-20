@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"clawdiator/internal/geocheck"
 	"fyne.io/systray"
-	"geocheck"
 )
 
 // trayIsBuilt tells that this binary has the tray. The release builds clawdiator-tray with the tray tag and cgo.

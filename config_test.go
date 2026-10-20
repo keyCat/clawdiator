@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"geocheck"
+	"clawdiator/internal/geocheck"
 )
 
 func TestGetGeoOptions(t *testing.T) {

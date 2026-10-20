@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"geocheck"
+	"clawdiator/internal/geocheck"
 )
 
 func TestFormatEventLog(t *testing.T) {
