@@ -698,8 +698,8 @@ func runService(ctx context.Context, paths appPaths) error {
 		driver.firewall = nil
 		driver.debugf("firewall", "the service does not run as root, so it does not change the firewall")
 	}
-	driver.debugf("service", "start: process %d, services %s, minimum replies %d, blocked countries %v, last event %d, local database %s",
-		os.Getpid(), strings.Join(geocheck.ServiceNames(checkOptions.Services), ","), checkOptions.MinReplies, cfg.BlockedCountries, state.LastEventSeq, db.describe())
+	driver.debugf("service", "start: version %s, process %d, services %s, minimum replies %d, blocked countries %v, last event %d, local database %s",
+		version, os.Getpid(), strings.Join(geocheck.ServiceNames(checkOptions.Services), ","), checkOptions.MinReplies, cfg.BlockedCountries, state.LastEventSeq, db.describe())
 	if dbErr != nil {
 		driver.debugf("dbip", "cannot open a file: %v", dbErr)
 	}

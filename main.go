@@ -17,6 +17,10 @@ import (
 
 const appName = "clawdiator"
 
+// version is the version of the build. The release build sets it with -ldflags "-X main.version=v1.2.3".
+// It is a variable, because -X cannot change a constant. A build without the flag has the value "dev".
+var version = "dev"
+
 func main() {
 	currentLanguage = detectLanguage()
 	if len(os.Args) < 2 {
@@ -48,6 +52,9 @@ func main() {
 		err = commandAgent(paths, args)
 	case "tray":
 		err = commandTray(paths)
+	case "version", "--version":
+		fmt.Println(appName + " " + version)
+		return
 	case "help", "-h", "--help":
 		fmt.Print(text(msgUsage))
 		return

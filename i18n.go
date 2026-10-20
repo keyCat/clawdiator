@@ -219,7 +219,7 @@ const (
 var messages = [messageCount][2]string{
 	msgUsage: {
 		`clawdiator blocks the access to Anthropic and OpenAI when this computer is in an unsupported country.
-The work on the tool is not complete. Now the tool works only on macOS, without the menu.
+The work on the tool is not complete. Now the tool works only on macOS.
 
 Usage:
   clawdiator <command> [options]
@@ -232,12 +232,13 @@ Commands:
   pause        Stops the block for a time: --for 30m, 4h or 3d, or --forever. Needs sudo.
   resume       Stops the pause. Needs sudo.
   hosts        --dry-run shows the change of the hosts file. --remove removes the block without the service.
+  version      Shows the version of the tool.
   help         Shows this help.
 
 The local country database: ` + dbCredit + `, license CC BY 4.0.
 `,
 		`clawdiator блокирует доступ к Anthropic и OpenAI, когда компьютер находится в неподдерживаемой стране.
-Работа над программой не завершена. Сейчас программа работает только на macOS, без меню.
+Работа над программой не завершена. Сейчас программа работает только на macOS.
 
 Использование:
   clawdiator <команда> [параметры]
@@ -250,6 +251,7 @@ The local country database: ` + dbCredit + `, license CC BY 4.0.
   pause        Снимает блокировку на время: --for 30m, 4h или 3d, или --forever. Нужен sudo.
   resume       Завершает паузу. Нужен sudo.
   hosts        --dry-run показывает изменение файла hosts. --remove удаляет блокировку без службы.
+  version      Показывает версию программы.
   help         Показывает эту справку.
 
 Локальная база стран: ` + dbCredit + `, лицензия CC BY 4.0.

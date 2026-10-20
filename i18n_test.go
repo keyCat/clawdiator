@@ -3,6 +3,7 @@ package main
 import (
 	"regexp"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -65,4 +66,17 @@ func useLanguage(t *testing.T, value language) {
 	previous := currentLanguage
 	currentLanguage = value
 	t.Cleanup(func() { currentLanguage = previous })
+}
+
+// The help lists the version command in both languages. The release script checks the value of the version in the binary.
+func TestHelpListsVersion(t *testing.T) {
+	for _, language := range []language{languageEnglish, languageRussian} {
+		useLanguage(t, language)
+		if !strings.Contains(text(msgUsage), "\n  version ") {
+			t.Errorf("the help in language %v must list the version command", language)
+		}
+	}
+	if version != "dev" {
+		t.Errorf("a build without -ldflags must have the version dev, not %q", version)
+	}
 }

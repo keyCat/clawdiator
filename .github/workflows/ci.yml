@@ -1,0 +1,51 @@
+# CI tests and builds clawdiator on macOS. The workflow "Release" also runs it before a release.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # A fixed image gives the same Xcode and the same macOS SDK for each run.
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Go 1.26 is the last Go that runs on macOS 12. Read scripts/build-release.sh.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26.10"
+
+      - name: Check go.mod and go.sum
+        run: go mod tidy -diff
+
+      - name: Vet
+        run: |
+          go vet ./...
+          CGO_ENABLED=1 go vet -tags tray ./...
+
+      - name: Test with the race detector
+        run: go test -race ./...
+
+      # The main binary of a release has no cgo, so the tests also run without cgo.
+      - name: Test without cgo
+        run: CGO_ENABLED=0 go test ./...
+
+      # Linux and Windows are not ready, but the code for them must compile.
+      - name: Build for Linux and Windows
+        run: |
+          for target in linux/amd64 linux/arm64 windows/amd64; do
+            CGO_ENABLED=0 GOOS="${target%/*}" GOARCH="${target#*/}" go build -o /dev/null .
+          done
+
+      - name: Build the release archives
+        run: scripts/build-release.sh v0.0.0-ci
