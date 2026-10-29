@@ -76,6 +76,10 @@ func formatEventLogWith(change event, timeFormat string) []string {
 		return []string{stamp + " all resumed"}
 	case eventError:
 		return []string{stamp + " service error " + cleanLogText(change.Error)}
+	case eventUpdate:
+		return []string{stamp + " all update the service installs version " + change.Version + " automatically"}
+	case eventUpdateNeeded:
+		return []string{stamp + " all update-needed version " + change.Version + " has a new consent text, so it needs \"sudo clawdiator update\""}
 	}
 	return nil
 }

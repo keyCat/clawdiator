@@ -36,6 +36,12 @@ func main() {
 		err = newInstaller(paths).commandInstall(args)
 	case "uninstall":
 		err = newInstaller(paths).commandUninstall()
+	case "update":
+		err = newInstaller(paths).commandUpdate(args)
+	case "update-info":
+		// The service asks a new binary before the automatic update. The format must not change.
+		fmt.Println(version, consentVersion)
+		return
 	case "status":
 		err = commandStatus(paths, args, time.Now(), os.Stdout)
 	case "check":

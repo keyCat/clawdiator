@@ -15,6 +15,14 @@ func runAsAdministrator(string, ...string) error {
 	return errNoDesktop
 }
 
+func openTerminal(string) error {
+	return errNoDesktop
+}
+
 func openLogFile(string) error {
+	return errNoDesktop
+}
+
+func openURL(string) error {
 	return errNoDesktop
 }

@@ -35,7 +35,7 @@ func startTray(paths appPaths) {
 	userDir, _ := getUserAppDir()
 	settingsPath := filepath.Join(userDir, "agent.json")
 
-	systray.SetIcon(buildTrayIcon(trayGreen))
+	systray.SetIcon(buildTrayIcon(trayGreen, false))
 	countryItem := systray.AddMenuItem("", "")
 	countryItem.Disable()
 	var providerItems []*systray.MenuItem
@@ -64,6 +64,12 @@ func startTray(paths appPaths) {
 	showVerboseLogItem := logItem.AddSubMenuItem(text(msgTrayShowVerboseLog), "")
 	hideItem := systray.AddMenuItem(text(msgTrayHide), "")
 	systray.AddSeparator()
+	updateItem := systray.AddMenuItem("", "")
+	updateItem.Hide()
+	websiteItem := systray.AddMenuItem(text(msgTrayWebsite), "")
+	websiteItem.Hide()
+	checkUpdateItem := systray.AddMenuItem(text(msgTrayCheckUpdate), "")
+	autoUpdateItem := systray.AddMenuItem(text(msgTrayAutoUpdate), "")
 	systray.AddMenuItem(appName+" "+version, "").Disable()
 
 	go onClick(checkItem, func() {
@@ -81,11 +87,28 @@ func startTray(paths appPaths) {
 	go onClick(allItem, func() { setNotices(preBlockNoticesAll) })
 	go onClick(showLogItem, func() { _ = openLogFile(paths.Log) })
 	go onClick(showVerboseLogItem, func() { _ = openLogFile(paths.DebugLog) })
+	// The update needs the password and can show a new consent text, so it runs in Terminal.
+	go onClick(updateItem, func() { _ = openTerminal("sudo " + quoteShell(paths.Binary) + " update") })
+	go onClick(websiteItem, func() { _ = openURL(websiteURL) })
+	go onClick(autoUpdateItem, func() {
+		value := "on"
+		if cfg, err := loadConfig(paths.Config); err == nil && cfg.AutoUpdate {
+			value = "off"
+		}
+		_ = runAsAdministrator(getUserName(), paths.Binary, "update", "--auto-install", value)
+	})
+	go onClick(checkUpdateItem, func() {
+		result, err := checkForUpdate(paths)
+		if err != nil {
+			result = err.Error()
+		}
+		_ = showNotice(result)
+	})
 	go onClick(hideItem, systray.Quit)
 
 	go func() {
 		var watcher heartbeatWatcher
-		lastColor := trayColor(-1)
+		lastColor, lastBadge := trayColor(-1), false
 		// The watch changes the icon soon after each save of the service. The poll every 2 seconds is the backup.
 		changes := watchFiles(context.Background(), paths.State)
 		for {
@@ -95,9 +118,9 @@ func startTray(paths appPaths) {
 				heartbeat = state.Heartbeat
 			}
 			view := buildTrayView(state, watcher.isServiceDown(time.Now(), heartbeat))
-			if view.Color != lastColor {
-				systray.SetIcon(buildTrayIcon(view.Color))
-				lastColor = view.Color
+			if view.Color != lastColor || view.HasBadge != lastBadge {
+				systray.SetIcon(buildTrayIcon(view.Color, view.HasBadge))
+				lastColor, lastBadge = view.Color, view.HasBadge
 			}
 			systray.SetTooltip(view.Tooltip)
 			countryItem.SetTitle(view.Country)
@@ -114,6 +137,16 @@ func startTray(paths appPaths) {
 				pauseItem.Show()
 				resumeItem.Hide()
 			}
+			if view.Update != "" {
+				updateItem.SetTitle(view.Update)
+				updateItem.Show()
+				websiteItem.Show()
+			} else {
+				updateItem.Hide()
+				websiteItem.Hide()
+			}
+			cfg, err := loadConfig(paths.Config)
+			setChecked(autoUpdateItem, err == nil && cfg.AutoUpdate)
 			settings, _ := loadAgentSettings(settingsPath)
 			setChecked(longItem, settings.PreBlockNotices == preBlockNoticesLong)
 			setChecked(allItem, settings.PreBlockNotices == preBlockNoticesAll)

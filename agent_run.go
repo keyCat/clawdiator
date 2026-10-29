@@ -43,8 +43,9 @@ func commandAgent(paths appPaths, args []string) error {
 			err := showNotice(next.Text)
 			logAgent(logPath, "notice %q, error: %v", next.Text, err)
 		}
-		if isFirstRun {
+		if isFirstRun || settings.Version != version {
 			isFirstRun = false
+			settings.Version = version
 			if err := saveAgentSettings(settingsPath, settings); err != nil {
 				logAgent(logPath, "cannot save %s: %v", settingsPath, err)
 			}

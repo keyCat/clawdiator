@@ -143,6 +143,7 @@ func renderAgentPlist(label string, args []string, isAlwaysAlive bool) string {
 
 func (launchdManager) Uninstall(paths appPaths) error {
 	_, _ = runCommand("launchctl", "bootout", "system/"+launchdLabel)
+	_, _ = runCommand("launchctl", "bootout", "system/"+updateLabel)
 	if err := os.Remove(paths.Plist); err != nil && !os.IsNotExist(err) {
 		return err
 	}

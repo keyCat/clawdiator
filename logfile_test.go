@@ -75,7 +75,7 @@ func TestAppendLogLimit(t *testing.T) {
 
 func TestBuildTrayIcon(t *testing.T) {
 	for state, want := range trayColors {
-		img, err := png.Decode(bytes.NewReader(buildTrayIcon(state)))
+		img, err := png.Decode(bytes.NewReader(buildTrayIcon(state, false)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -94,5 +94,12 @@ func TestBuildTrayIcon(t *testing.T) {
 		if isWhite != (state == trayAlert) {
 			t.Errorf("state %d: only the alert icon has the white mark", state)
 		}
+	}
+	// The dot of a new version is in the upper right corner, on the circle.
+	badged, _ := png.Decode(bytes.NewReader(buildTrayIcon(trayGreen, true)))
+	plain, _ := png.Decode(bytes.NewReader(buildTrayIcon(trayGreen, false)))
+	red, green, blue, _ := badged.At(25, 7).RGBA()
+	if uint8(red>>8) != badgeColor.R || uint8(green>>8) != badgeColor.G || uint8(blue>>8) != badgeColor.B || plain.At(25, 7) == badged.At(25, 7) {
+		t.Errorf("the dot must be blue and only on the icon with the badge: %v, %v", badged.At(25, 7), plain.At(25, 7))
 	}
 }

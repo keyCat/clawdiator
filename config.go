@@ -13,7 +13,7 @@ import (
 )
 
 // consentVersion is the version of the consent text. Increase it when the text changes. Then install asks again.
-const consentVersion = 3
+const consentVersion = 4
 
 // Config is the content of config.json.
 type Config struct {
@@ -23,7 +23,9 @@ type Config struct {
 	GeoMinReplies int `json:"geo_min_replies,omitempty"`
 	// BlockedCountries holds more country codes to block for both providers, for example ["AF"].
 	BlockedCountries []string `json:"blocked_countries,omitempty"`
-	Consent          consent  `json:"consent"`
+	// AutoUpdate lets the service install a new version without the user. It is off until a user turns it on.
+	AutoUpdate bool    `json:"auto_update,omitempty"`
+	Consent    consent `json:"consent"`
 }
 
 // consent records the agreement of the user to the block.

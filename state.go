@@ -31,6 +31,10 @@ const (
 	eventPauseUnblock eventKind = "pause_unblock"
 	// eventError: the service could not do a task, for example a change of the hosts file.
 	eventError eventKind = "error"
+	// eventUpdate: the service starts the install of a new version. The install stops the service.
+	eventUpdate eventKind = "update"
+	// eventUpdateNeeded: a new version has a new consent text, so the user must install it.
+	eventUpdateNeeded eventKind = "update_needed"
 )
 
 // maxEvents is the number of the last events that state.json keeps.
@@ -57,6 +61,8 @@ type event struct {
 	Error string `json:"error,omitempty"`
 	// Cause tells why a pre-block started. preBlockCauseSleep is a pre-block before a sleep. An empty value is a change of the network.
 	Cause string `json:"cause,omitempty"`
+	// Version is the new version of an update event.
+	Version string `json:"version,omitempty"`
 }
 
 // preBlockCauseSleep is the cause of a pre-block before a sleep of the computer.
@@ -80,6 +86,19 @@ type providerState struct {
 type checkFailure struct {
 	Time  time.Time `json:"time"`
 	Error string    `json:"error,omitempty"`
+}
+
+// updateState is the result of the last check for a new version. The tray and the status command show a newer version.
+type updateState struct {
+	// Latest is the tag of the newest release.
+	Latest    string    `json:"latest,omitempty"`
+	CheckTime time.Time `json:"check_time"`
+	// Error is the error of the last check. It is empty after a check without an error.
+	Error string `json:"error,omitempty"`
+	// IsAuto tells that automatic updates were on at the last check.
+	IsAuto bool `json:"is_auto,omitempty"`
+	// ConsentTag is the newest tag that needs a new consent. The service does not download this tag again.
+	ConsentTag string `json:"consent_tag,omitempty"`
 }
 
 // localDBState is the file of the local database. An empty File means that the service has no correct file.
@@ -130,6 +149,8 @@ type serviceState struct {
 	LocalDB localDBState `json:"local_db,omitzero"`
 	// Firewall is the state of the firewall rules for the ranges of Anthropic. Only macOS has these rules now.
 	Firewall firewallState `json:"firewall,omitzero"`
+	// Update is the result of the last check for a new version.
+	Update updateState `json:"update,omitzero"`
 	// LastEventSeq is the sequence number of the last event.
 	LastEventSeq int64   `json:"last_event_seq"`
 	Events       []event `json:"events"`

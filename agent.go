@@ -24,6 +24,8 @@ const (
 	heartbeatTimeout = 2 * time.Minute
 	// agentWakeMargin allows a small difference between the wake of the service and the wake of the agent.
 	agentWakeMargin = 5 * time.Second
+	// updateReminderInterval is the time between 2 notices about the same new version. A new login also shows the notice.
+	updateReminderInterval = 24 * time.Hour
 	// agentInterval is the time between 2 reads of state.json by the agent and by the tray.
 	agentInterval = 2 * time.Second
 )
@@ -32,6 +34,9 @@ const (
 type agentSettings struct {
 	PreBlockNotices       string `json:"pre_block_notices"`
 	PreBlockNoticeSeconds int    `json:"pre_block_notice_seconds"`
+	// Version is the version of the last agent that ran. A different version at the start shows the update notice.
+	// The agent knows it this way, because the new service adds its events before the new agent starts.
+	Version string `json:"version,omitempty"`
 }
 
 // withDefaults replaces the values that are missing or not correct with the default values.
@@ -137,6 +142,9 @@ type agentModel struct {
 	// lastUpdate is the time of the last pass. A gap of more than wakeGap shows a wake of the computer at wakeTime.
 	lastUpdate time.Time
 	wakeTime   time.Time
+	// remindedVersion and remindedTime are the version and the time of the last notice about a new version.
+	remindedVersion string
+	remindedTime    time.Time
 }
 
 func newAgentModel(settings agentSettings) *agentModel {
@@ -167,6 +175,10 @@ func (m *agentModel) update(now time.Time, state *serviceState, isFirstRun bool)
 	}
 	if state == nil {
 		return notices
+	}
+	if waiting := getWaitingUpdate(state); waiting != "" && (waiting != m.remindedVersion || now.Sub(m.remindedTime) >= updateReminderInterval) {
+		m.remindedVersion, m.remindedTime = waiting, now
+		notices = append(notices, notice{text(msgNoticeUpdateAvailable, waiting, websiteURL)})
 	}
 	if !m.isStarted {
 		m.isStarted = true
@@ -206,6 +218,9 @@ func (m *agentModel) getLoginNotices(state *serviceState, isFirstRun bool) []not
 		}
 	}
 	var notices []notice
+	if !isFirstRun && m.settings.Version != "" && m.settings.Version != version {
+		notices = append(notices, notice{text(msgNoticeUpdated, version)})
+	}
 	if isFirstRun {
 		if state.Country != "" {
 			notices = append(notices, notice{text(msgNoticeWelcome, state.Country)})
@@ -338,6 +353,10 @@ type trayView struct {
 	Providers []string
 	LastCheck string
 	IsPaused  bool
+	// Update is the menu item that installs a newer version. It is empty if this version is the newest.
+	Update string
+	// HasBadge shows a dot on the icon: a new version waits for the user.
+	HasBadge bool
 }
 
 // buildTrayView returns the view for the state. A nil state, or a service that does not work, gives the alert color.
@@ -360,6 +379,10 @@ func buildTrayView(state *serviceState, isServiceDown bool) trayView {
 	if !state.LastFullCheck.IsZero() {
 		view.LastCheck = text(msgTrayLastCheck, state.LastFullCheck.Local().Format("15:04"))
 	}
+	if isNewerVersion(state.Update.Latest, version) {
+		view.Update = text(msgTrayUpdate, state.Update.Latest)
+	}
+	view.HasBadge = getWaitingUpdate(state) != ""
 	isVerdictBlocked := false
 	for _, provider := range geocheck.Providers() {
 		isVerdictBlocked = isVerdictBlocked || state.provider(provider).IsBlocked
@@ -375,6 +398,16 @@ func buildTrayView(state *serviceState, isServiceDown bool) trayView {
 		view.Color, view.Tooltip = trayGreen, text(msgTrayTooltipOpen)
 	}
 	return view
+}
+
+// getWaitingUpdate returns the newer version that waits for the user, or an empty text. With automatic updates,
+// a version waits only if its install failed or if it has a new consent text.
+func getWaitingUpdate(state *serviceState) string {
+	update := state.Update
+	if !isNewerVersion(update.Latest, version) || (update.IsAuto && update.Error == "" && update.ConsentTag != update.Latest) {
+		return ""
+	}
+	return update.Latest
 }
 
 // readServiceState reads state.json for the agent. A missing or damaged file gives nil.

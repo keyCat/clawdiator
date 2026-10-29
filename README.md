@@ -98,6 +98,9 @@ To change a setting, run `install` again with the option. The other settings sta
 | `clawdiator check` | Asks the service for a full check now. The service accepts 1 check in 5 seconds. |
 | `sudo clawdiator pause --for 2h` | Stops the block for a time, for example `30m`, `4h` or `3d`. `--forever` gives a pause with no end. |
 | `sudo clawdiator resume` | Stops the pause. Then the service checks the country again. |
+| `sudo clawdiator update` | Installs the newest version from GitHub. |
+| `clawdiator update --check` | Asks the service to check for a new version now. The command needs no sudo. |
+| `sudo clawdiator update --auto-install on` | Turns the automatic updates on. Use `off` to turn them off. |
 | `clawdiator version` | Shows the version. |
 | `clawdiator help` | Shows the help. |
 
@@ -116,6 +119,45 @@ The service writes 2 logs in `/Library/Application Support/clawdiator`:
 - `clawdiator-debug.log` has the details of each step, with the time in milliseconds. `clawdiator status --verbose` shows its end.
 
 CAUTION: The verbose log contains the public IP address of the computer. Do not publish a copy of the log.
+
+## Updates
+
+The service checks GitHub for a new version 5 minutes after its start, and then every 6 hours.
+It does not install a new version without your permission.
+
+When a new version is available, you see these signs:
+
+- A blue dot on the tray icon.
+- A notice at once, at each login, and every 24 hours until you install the version.
+- The items "Install vX…" and "Open the website…" in the tray menu. The website is https://ilya.zone/clawdiator/.
+- A line in `clawdiator status`.
+
+To install the new version, select "Install vX…" in the tray menu. A Terminal window opens and runs this command:
+
+```sh
+sudo clawdiator update
+```
+
+Type your password. The command downloads the version from GitHub and checks it with `SHA256SUMS`. Then it installs the version, and the settings stay.
+If the consent text changed, the command shows the new text. Type `yes` to agree. After the update, a notice shows the new version.
+
+To check now, select "Check for updates" in the tray menu, or run `clawdiator update --check`. The service accepts 1 such request in 5 seconds.
+A notice or the command then shows the result.
+
+### Automatic updates
+
+The automatic updates are off by default. To turn them on, select "Install updates automatically" in the tray menu. Then type your password.
+You can also use this command. Use `off` to turn them off again.
+
+```sh
+sudo clawdiator update --auto-install on
+```
+
+With the automatic updates on, the service downloads and checks each new version. Then it installs the version without a question.
+It never installs a version with a new consent text automatically. Such a version waits for you, the same as with the automatic updates off.
+The output of the last automatic update is in `/Library/Application Support/clawdiator/update.log`.
+
+A local build with the version `dev` does not check for updates.
 
 ## Uninstall
 
@@ -146,6 +188,7 @@ The service sends the public IP address of the computer to these services, and t
 - Cloudflare: 1 request every 30 seconds.
 - ipwho.is and geojs.io: 1 request for each full check.
 - db-ip.com: 1 download of the country database each month.
+- github.com: 1 request every 6 hours for the newest version, and the download of each new version that the tool installs.
 
 The service sends no other data. It reads no traffic of the computer.
 

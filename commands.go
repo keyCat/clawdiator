@@ -79,6 +79,7 @@ func (in *installer) commandInstall(args []string) error {
 	}
 	flags := newFlagSet("install")
 	isYes := flags.Bool("yes", false, text(msgFlagYes))
+	isUnattended := flags.Bool("unattended", false, text(msgFlagUnattended))
 	geoServices := flags.String("geo-services", "", text(msgFlagGeoServices, strings.Join(geocheck.DefaultServiceNames(), ",")))
 	geoMinReplies := flags.Int("geo-min-replies", 0, text(msgFlagGeoMinReplies))
 	blockedCountries := flags.String("blocked-countries", "", text(msgFlagBlockedCountries))
@@ -111,6 +112,10 @@ func (in *installer) commandInstall(args []string) error {
 		return err
 	}
 	if cfg.Consent.Version < consentVersion {
+		// The automatic update has nobody to agree. So it stops here, before any change.
+		if *isUnattended {
+			return errorf(msgConsentNeeded)
+		}
 		fmt.Fprint(in.stdout, text(msgConsentText))
 		if !*isYes && !readYes(in.stdin) {
 			return errorf(msgConsentDeclined)
@@ -419,6 +424,14 @@ func commandStatus(paths appPaths, args []string, now time.Time, stdout io.Write
 	}
 	if count, err := countBlockedHosts(paths.Hosts); err == nil {
 		fmt.Fprintln(stdout, text(msgStatusHosts, paths.Hosts, count))
+	}
+	if isNewerVersion(state.Update.Latest, version) {
+		fmt.Fprintln(stdout, text(msgStatusUpdate, state.Update.Latest, websiteURL))
+	}
+	if cfg, err := loadConfig(paths.Config); err == nil && cfg.AutoUpdate {
+		fmt.Fprintln(stdout, text(msgStatusAutoUpdateOn))
+	} else {
+		fmt.Fprintln(stdout, text(msgStatusAutoUpdateOff))
 	}
 	if lines := readLastLines(logPath, *lineCount); len(lines) > 0 {
 		fmt.Fprintln(stdout, text(msgStatusLog, logPath))

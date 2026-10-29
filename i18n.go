@@ -214,6 +214,30 @@ const (
 	msgTrayShowLog
 	msgTrayShowVerboseLog
 	msgTrayHide
+	msgTrayUpdate
+	msgFlagUnattended
+	msgConsentNeeded
+	msgUpdateNewest
+	msgUpdateDownload
+	msgUpdateCheckFailed
+	msgUpdateDownloadFailed
+	msgNoticeUpdated
+	msgNoticeUpdateAvailable
+	msgStatusUpdate
+	msgTrayCheckUpdate
+	msgFlagUpdateCheck
+	msgUpdateInstalling
+	msgUpdateCheckError
+	msgUpdateLocalBuild
+	msgUpdateCheckTimeout
+	msgTrayWebsite
+	msgTrayAutoUpdate
+	msgFlagAutoInstall
+	msgAutoInstallValue
+	msgAutoUpdateOn
+	msgAutoUpdateOff
+	msgStatusAutoUpdateOn
+	msgStatusAutoUpdateOff
 	messageCount
 )
 
@@ -228,6 +252,9 @@ Usage:
 Commands:
   install      Saves the settings and the consent. Registers and starts the service. Needs sudo.
   uninstall    Removes the service, the block and the files. Needs sudo.
+  update       Installs the newest version from GitHub. Needs sudo.
+               --check only asks the service to check now. It needs no sudo.
+               --auto-install on or off turns the automatic updates on or off.
   status       Shows the state of the service, the country and the block.
   check        Asks the service for a full check of the country now.
   pause        Stops the block for a time: --for 30m, 4h or 3d, or --forever. Needs sudo.
@@ -247,6 +274,9 @@ The local country database: ` + dbCredit + `, license CC BY 4.0.
 Команды:
   install      Сохраняет настройки и согласие. Регистрирует и запускает службу. Нужен sudo.
   uninstall    Удаляет службу, блокировку и файлы. Нужен sudo.
+  update       Устанавливает новейшую версию с GitHub. Нужен sudo.
+               --check только просит службу проверить сейчас. Не требует sudo.
+               --auto-install on или off включает или выключает автоматические обновления.
   status       Показывает состояние службы, страну и блокировку.
   check        Просит службу проверить страну сейчас.
   pause        Снимает блокировку на время: --for 30m, 4h или 3d, или --forever. Нужен sudo.
@@ -306,6 +336,9 @@ Read what the service does:
   3. After each wake from sleep and each change of the network, it blocks the access until the country
      check passes.
   4. An administrator can pause the service, or remove it with "sudo clawdiator uninstall".
+  5. Every 6 hours, it asks github.com for the newest version. GitHub sees your public IP address.
+     It installs a new version only if you turn on the automatic updates in the menu, or if you run
+     "sudo clawdiator update". An automatic update never installs a version with a new consent text.
 
 Type "yes" to agree: `,
 		`clawdiator блокирует Anthropic и OpenAI на этом компьютере, когда компьютер находится в неподдерживаемой стране.
@@ -320,6 +353,10 @@ Type "yes" to agree: `,
   3. После каждого выхода из сна и каждой смены сети она блокирует доступ, пока проверка страны
      не пройдёт.
   4. Администратор может поставить службу на паузу или удалить её командой "sudo clawdiator uninstall".
+  5. Каждые 6 часов она запрашивает новейшую версию на github.com. GitHub видит ваш публичный IP-адрес.
+     Она устанавливает новую версию, только если вы включите автоматические обновления в меню
+     или выполните "sudo clawdiator update". Автоматическое обновление никогда не устанавливает версию
+     с новым текстом согласия.
 
 Введите "да" или "yes", чтобы согласиться: `,
 	},
@@ -456,4 +493,39 @@ Type "yes" to agree: `,
 	msgTrayShowLog:                {"Show the log", "Показать журнал"},
 	msgTrayShowVerboseLog:         {"Show the verbose log", "Показать подробный журнал"},
 	msgTrayHide:                   {"Hide the icon", "Скрыть значок"},
+	msgTrayUpdate:                 {"Install %s…", "Установить %s…"},
+	msgFlagUnattended: {"ask no questions. The automatic update uses it. If the consent text changed, the command stops with an error",
+		"не задавать вопросов. Это нужно для автоматического обновления. Если текст согласия изменился, команда завершается с ошибкой"},
+	msgConsentNeeded: {"the consent text changed, so the automatic update cannot install this version. Run \"sudo clawdiator update\"",
+		"текст согласия изменился, поэтому автоматическое обновление не может установить эту версию. Выполните \"sudo clawdiator update\""},
+	msgUpdateNewest:         {"clawdiator %s is the newest version.", "clawdiator %s — новейшая версия."},
+	msgUpdateDownload:       {"The tool downloads clawdiator %s from GitHub.", "Программа скачивает clawdiator %s с GitHub."},
+	msgUpdateCheckFailed:    {"the tool did not find the newest version: %v", "программа не нашла новейшую версию: %v"},
+	msgUpdateDownloadFailed: {"the tool did not download the new version: %v", "программа не скачала новую версию: %v"},
+	msgNoticeUpdated:        {"clawdiator now has the version %s.", "Теперь у clawdiator версия %s."},
+	msgNoticeUpdateAvailable: {"clawdiator %[1]s is available. To install it, select \"Install %[1]s…\" in the menu of the icon. More: %[2]s",
+		"Доступен clawdiator %[1]s. Чтобы установить его, выберите \"Установить %[1]s…\" в меню значка. Подробнее: %[2]s"},
+	msgStatusUpdate: {"New version: %s. To install it, run \"sudo clawdiator update\". More: %s",
+		"Новая версия: %s. Чтобы установить её, выполните \"sudo clawdiator update\". Подробнее: %s"},
+	msgTrayCheckUpdate: {"Check for updates", "Проверить обновления"},
+	msgFlagUpdateCheck: {"only ask the service to check for a new version now. It needs no sudo",
+		"только попросить службу проверить новую версию сейчас. Не требует sudo"},
+	msgUpdateInstalling: {"New version: %s. The service installs it now. A notice comes after the update.",
+		"Новая версия: %s. Служба устанавливает её сейчас. После обновления придёт уведомление."},
+	msgUpdateCheckError: {"the check for a new version failed: %s", "проверка новой версии не прошла: %s"},
+	msgUpdateLocalBuild: {"the service is a local build, so it does not update itself", "служба — локальная сборка, поэтому она не обновляется сама"},
+	msgUpdateCheckTimeout: {"the service did not finish the check in %d seconds. Run \"clawdiator status --verbose\" to see the log",
+		"служба не завершила проверку за %d секунд. Выполните \"clawdiator status --verbose\", чтобы увидеть журнал"},
+	msgTrayWebsite:    {"Open the website…", "Открыть сайт…"},
+	msgTrayAutoUpdate: {"Install updates automatically", "Устанавливать обновления автоматически"},
+	msgFlagAutoInstall: {"on or off: turn the automatic install of new versions on or off. Needs sudo",
+		"on или off: включить или выключить автоматическую установку новых версий. Нужен sudo"},
+	msgAutoInstallValue: {"--auto-install takes on or off", "--auto-install принимает on или off"},
+	msgAutoUpdateOn: {"Automatic updates are on. The service installs each new version without a question, if its consent text is the same.",
+		"Автоматические обновления включены. Служба устанавливает каждую новую версию без вопроса, если текст согласия не изменился."},
+	msgAutoUpdateOff: {"Automatic updates are off. The service tells about a new version, but it does not install it.",
+		"Автоматические обновления выключены. Служба сообщает о новой версии, но не устанавливает её."},
+	msgStatusAutoUpdateOn: {"Automatic updates: on.", "Автоматические обновления: включены."},
+	msgStatusAutoUpdateOff: {"Automatic updates: off. To turn them on, run \"sudo clawdiator update --auto-install on\".",
+		"Автоматические обновления: выключены. Чтобы включить их, выполните \"sudo clawdiator update --auto-install on\"."},
 }

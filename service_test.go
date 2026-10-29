@@ -106,6 +106,12 @@ func newTestDriver(t *testing.T) *testDriver {
 	td.hostsStamp = func() string { return td.hostsFileStamp }
 	// The tests never use the network. A test of the local database replaces this function.
 	td.downloadDB = func(context.Context, string) (*countryDB, error) { return nil, errOffline }
+	td.update = updater{
+		clean:   func() {},
+		latest:  func(context.Context) (string, error) { return "", errOffline },
+		prepare: func(context.Context, string) (updateInfo, error) { return updateInfo{}, errOffline },
+		start:   func(string) error { return errOffline },
+	}
 	// The tests never change pf. A test of the firewall sets a fake pfctl.
 	td.firewall = nil
 	if err := os.MkdirAll(td.paths.Dir, 0o755); err != nil {

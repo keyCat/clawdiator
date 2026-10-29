@@ -10,11 +10,12 @@ import (
 	"time"
 )
 
-// The commands of the sockets. All users can send check. Only root can send pause and resume.
+// The commands of the sockets. All users can send check and update_check. Only root can send pause and resume.
 const (
-	socketCheck  = "check"
-	socketPause  = "pause"
-	socketResume = "resume"
+	socketCheck       = "check"
+	socketUpdateCheck = "update_check"
+	socketPause       = "pause"
+	socketResume      = "resume"
 )
 
 // The codes of the answers.
@@ -25,6 +26,8 @@ const (
 	codeNoPause        = "no_pause"
 	codeBadRequest     = "bad_request"
 	codeServiceTimeout = "timeout"
+	// codeLocalBuild tells that the service is a local build, so it does not update itself.
+	codeLocalBuild = "local_build"
 )
 
 // commandTimeout is the time limit of 1 command on a socket.

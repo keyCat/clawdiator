@@ -21,9 +21,13 @@ var trayColors = map[trayColor]color.RGBA{
 	trayAlert:  {R: 0xFF, G: 0x3B, B: 0x30, A: 0xFF},
 }
 
+// badgeColor is the color of the dot that shows a new version.
+var badgeColor = color.RGBA{R: 0x0A, G: 0x84, B: 0xFF, A: 0xFF}
+
 // buildTrayIcon returns a PNG image: a filled circle in the color of the state.
 // The alert state also has a white "!", so that the user can see it without the color.
-func buildTrayIcon(state trayColor) []byte {
+// With hasBadge, a blue dot in the upper right corner shows that a new version waits.
+func buildTrayIcon(state trayColor, hasBadge bool) []byte {
 	fill := trayColors[state]
 	img := image.NewRGBA(image.Rect(0, 0, trayIconSize, trayIconSize))
 	center := float64(trayIconSize) / 2
@@ -43,9 +47,27 @@ func buildTrayIcon(state trayColor) []byte {
 			img.SetRGBA(x, y, scaleAlpha(pixel, coverage))
 		}
 	}
+	if hasBadge {
+		drawBadge(img)
+	}
 	var buffer bytes.Buffer
 	_ = png.Encode(&buffer, img)
 	return buffer.Bytes()
+}
+
+// drawBadge draws the dot of a new version. A clear ring separates the dot from the circle.
+func drawBadge(img *image.RGBA) {
+	const centerX, centerY, radius, ring = 25.0, 7.0, 5.0, 1.5
+	for y := 0; y < trayIconSize; y++ {
+		for x := 0; x < trayIconSize; x++ {
+			distance := math.Hypot(float64(x)+0.5-centerX, float64(y)+0.5-centerY)
+			if coverage := math.Min(1, radius-distance+0.5); coverage > 0 {
+				img.SetRGBA(x, y, scaleAlpha(badgeColor, coverage))
+			} else if distance < radius+ring {
+				img.SetRGBA(x, y, color.RGBA{})
+			}
+		}
+	}
 }
 
 // isExclamationPixel tells if the pixel is a part of the "!" in the middle of the icon.

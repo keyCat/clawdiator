@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -68,6 +69,29 @@ type dbDone struct {
 	Duration time.Duration
 }
 
+// updateDone is the result of a check for a new version.
+type updateDone struct {
+	Latest string
+	// Info is empty if no new version needs an install.
+	Info updateInfo
+	Err  error
+	// IsAuto and Consent come from config.json at the start of the check.
+	IsAuto  bool
+	Consent int
+}
+
+// updater holds the steps of the automatic update. The tests replace them, so the tests use no network and no launchd.
+type updater struct {
+	// clean removes the job and the folder of the last update.
+	clean func()
+	// latest returns the tag of the newest release.
+	latest func(ctx context.Context) (string, error)
+	// prepare downloads the release of the tag and asks the new binary about itself.
+	prepare func(ctx context.Context, tag string) (updateInfo, error)
+	// start starts the install of the new binary in a separate job. The install stops this service.
+	start func(binary string) error
+}
+
 // serviceDriver connects the core to the system. Only the goroutine of run calls its methods,
 // except the goroutines of the probes, the full checks and the downloads. These send their results over the results channel.
 type serviceDriver struct {
@@ -107,11 +131,19 @@ type serviceDriver struct {
 	savedSeq      int64
 	loggedSeq     int64
 	lastUserCheck time.Time
+	// lastUpdateRequest is the time of the last update check that a user forced.
+	lastUpdateRequest time.Time
 
 	// countryDB is the local database. It is nil if the service has no correct file.
 	countryDB           *countryDB
 	isDBDownloadRunning bool
 	lastDBDownload      time.Time
+
+	// currentVersion is the version of this binary. A local build has "dev" and does not update itself.
+	currentVersion  string
+	update          updater
+	isUpdateRunning bool
+	nextUpdateCheck time.Time
 
 	// isFirewallKnown tells if the service applied the firewall rules after its start.
 	isFirewallKnown       bool
@@ -143,6 +175,14 @@ func newServiceDriver(ctx context.Context, c *core, paths appPaths, checkOptions
 		loggedSeq:      c.state.LastEventSeq,
 	}
 	driver.downloadDB = newDBDownloader(paths.Dir)
+	driver.currentVersion = version
+	updateDir := filepath.Join(paths.Dir, "update")
+	driver.update = updater{
+		clean:   func() { cleanUpdate(updateDir) },
+		latest:  func(ctx context.Context) (string, error) { return fetchLatestVersion(ctx, releasesURL) },
+		prepare: func(ctx context.Context, tag string) (updateInfo, error) { return prepareUpdate(ctx, updateDir, tag) },
+		start:   func(binary string) error { return startUpdateJob(paths, binary) },
+	}
 	driver.firewall = newFirewall()
 	driver.hostsStamp = func() string { return getFileStamp(paths.Hosts) }
 	driver.savedFirewall = c.state.Firewall
@@ -218,6 +258,7 @@ func (d *serviceDriver) run(inputs loopInputs) {
 func (d *serviceDriver) handleTick() {
 	d.startActions(d.core.tick(d.now(), d.getFingerprint()))
 	d.startDBDownload()
+	d.startUpdateCheck()
 	if count := sleepBlockTimeouts.Load(); count != d.loggedSleepTimeouts {
 		d.loggedSleepTimeouts = count
 		d.debugf("power", "the answer to a sleep came after the timeout of %v, without the block. Count of such answers: %d", sleepBlockTimeout, count)
@@ -240,6 +281,71 @@ func (d *serviceDriver) startDBDownload() {
 		db, err := downloadNewestDB(d.ctx, d.downloadDB, now, hasUsableFile)
 		d.sendResult(dbDone{Month: month, DB: db, Err: err, Duration: time.Since(start)})
 	})
+}
+
+// startUpdateCheck starts a check for a new version, the first time updateFirstCheckDelay after the start
+// and then every updateCheckInterval. A local build does not check.
+func (d *serviceDriver) startUpdateCheck() {
+	now := d.now().Round(0)
+	if d.nextUpdateCheck.IsZero() {
+		d.nextUpdateCheck = now.Add(updateFirstCheckDelay)
+	}
+	if d.isUpdateRunning || now.Before(d.nextUpdateCheck) || !tagPattern.MatchString(d.currentVersion) {
+		return
+	}
+	d.isUpdateRunning, d.nextUpdateCheck = true, now.Add(updateCheckInterval)
+	consentTag := d.core.state.Update.ConsentTag
+	// A user changes the setting with an admin command at any time, so the check reads config.json each time.
+	// Without a correct file, the service does not install anything.
+	done := updateDone{}
+	if cfg, err := loadConfig(d.paths.Config); err == nil {
+		done.IsAuto, done.Consent = cfg.AutoUpdate, cfg.Consent.Version
+	}
+	d.spawn(func() {
+		ctx, cancel := context.WithTimeout(d.ctx, updateTimeout)
+		defer cancel()
+		d.update.clean()
+		done.Latest, done.Err = d.update.latest(ctx)
+		// Without automatic updates, the service only tells about a new version. It downloads nothing.
+		if done.Err == nil && done.IsAuto && isNewerVersion(done.Latest, d.currentVersion) && done.Latest != consentTag {
+			done.Info, done.Err = d.update.prepare(ctx, done.Latest)
+		}
+		d.sendResult(done)
+	})
+}
+
+// handleUpdate takes the result of a check for a new version. It starts the install of a new version,
+// or it tells the user that the new version needs a new consent.
+func (d *serviceDriver) handleUpdate(now time.Time, done updateDone) {
+	now = now.Round(0)
+	state := &d.core.state.Update
+	state.CheckTime, state.Error, state.IsAuto = now, "", done.IsAuto
+	if done.Latest != "" {
+		state.Latest = done.Latest
+	}
+	isInstall := false
+	switch {
+	case done.Err != nil:
+		state.Error = done.Err.Error()
+		d.debugf("update", "the check failed: %v. The next check is in %v", done.Err, updateCheckInterval)
+	case done.Info.Binary == "":
+		d.debugf("update", "the newest version is %s, this version is %s, automatic updates: %v", done.Latest, d.currentVersion, done.IsAuto)
+	case done.Info.Consent > done.Consent:
+		d.debugf("update", "%s has the consent version %d, but the user agreed to %d, so the user must install it", done.Latest, done.Info.Consent, done.Consent)
+		state.ConsentTag = done.Latest
+		d.core.addEvent(now, event{Kind: eventUpdateNeeded, Version: done.Latest})
+	default:
+		d.debugf("update", "start the install of %s from %s", done.Latest, done.Info.Binary)
+		d.core.addEvent(now, event{Kind: eventUpdate, Version: done.Latest})
+		isInstall = true
+	}
+	// A forced check waits for the result in state.json, and the install stops the service. So the state goes to the disk at once.
+	d.afterStep(true)
+	if isInstall {
+		if err := d.update.start(done.Info.Binary); err != nil {
+			d.core.addError(now, "the automatic update to "+done.Latest+" did not start: "+err.Error())
+		}
+	}
 }
 
 // setCountryDB starts to use the local database. The status command shows it.
@@ -290,6 +396,9 @@ func (d *serviceDriver) handleResult(result any) {
 		d.core.handleCheck(now, done.Generation, done.Result, done.Err)
 	case dnsFlushDone:
 		d.debugf("dns", "flush in %v: %s", done.Duration.Round(time.Microsecond), done.Result)
+	case updateDone:
+		d.isUpdateRunning = false
+		d.handleUpdate(now, done)
 	case dbDone:
 		d.isDBDownloadRunning = false
 		if done.Err != nil {
@@ -320,6 +429,19 @@ func (d *serviceDriver) answerRequest(received commandRequest) commandResponse {
 		}
 		d.lastUserCheck = now
 		d.startActions(d.core.requestCheck("user command"))
+	case socketUpdateCheck:
+		if !tagPattern.MatchString(d.currentVersion) {
+			return commandResponse{Code: codeLocalBuild}
+		}
+		if !d.lastUpdateRequest.IsZero() && now.Sub(d.lastUpdateRequest) < userCheckInterval {
+			return commandResponse{Code: codeTooSoon}
+		}
+		d.lastUpdateRequest = now
+		// A running check gives its result soon. The client waits for it.
+		if !d.isUpdateRunning {
+			d.nextUpdateCheck = now.Round(0)
+			d.startUpdateCheck()
+		}
 	case socketPause:
 		until := received.Until
 		if received.IsForever {
@@ -712,7 +834,7 @@ func runService(ctx context.Context, paths appPaths) error {
 	if err != nil {
 		c.addError(time.Now(), "cannot open the sockets, so the check, pause and resume commands do not work: "+err.Error())
 	} else {
-		go serveCommands(ctx, checkListener, []string{socketCheck}, driver.requests)
+		go serveCommands(ctx, checkListener, []string{socketCheck, socketUpdateCheck}, driver.requests)
 		go serveCommands(ctx, controlListener, []string{socketPause, socketResume}, driver.requests)
 	}
 	// The first pass applies the pre-block at once. The ticker gives the next pass after 2 seconds.
