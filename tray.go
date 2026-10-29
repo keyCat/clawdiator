@@ -59,8 +59,9 @@ func startTray(paths appPaths) {
 	longItem := noticesItem.AddSubMenuItem(text(msgTrayNoticesLong), "")
 	allItem := noticesItem.AddSubMenuItem(text(msgTrayNoticesAll), "")
 	systray.AddSeparator()
-	settingsItem := systray.AddMenuItem(text(msgTraySettings), "")
-	logItem := systray.AddMenuItem(text(msgTrayShowLog), "")
+	logItem := systray.AddMenuItem(text(msgTrayLog), "")
+	showLogItem := logItem.AddSubMenuItem(text(msgTrayShowLog), "")
+	showVerboseLogItem := logItem.AddSubMenuItem(text(msgTrayShowVerboseLog), "")
 	hideItem := systray.AddMenuItem(text(msgTrayHide), "")
 	systray.AddSeparator()
 	systray.AddMenuItem(appName+" "+version, "").Disable()
@@ -78,8 +79,8 @@ func startTray(paths appPaths) {
 	}
 	go onClick(longItem, func() { setNotices(preBlockNoticesLong) })
 	go onClick(allItem, func() { setNotices(preBlockNoticesAll) })
-	go onClick(settingsItem, func() { _ = openTerminal(quoteShell(paths.Binary) + " status") })
-	go onClick(logItem, func() { _ = openLogFile(paths.Log) })
+	go onClick(showLogItem, func() { _ = openLogFile(paths.Log) })
+	go onClick(showVerboseLogItem, func() { _ = openLogFile(paths.DebugLog) })
 	go onClick(hideItem, systray.Quit)
 
 	go func() {

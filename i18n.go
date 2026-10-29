@@ -210,8 +210,9 @@ const (
 	msgTrayNotices
 	msgTrayNoticesLong
 	msgTrayNoticesAll
-	msgTraySettings
+	msgTrayLog
 	msgTrayShowLog
+	msgTrayShowVerboseLog
 	msgTrayHide
 	messageCount
 )
@@ -451,7 +452,8 @@ Type "yes" to agree: `,
 	msgTrayNotices:                {"Notices after a wake", "Уведомления после выхода из сна"},
 	msgTrayNoticesLong:            {"Only long blocks", "Только долгие блокировки"},
 	msgTrayNoticesAll:             {"All", "Все"},
-	msgTraySettings:               {"Open settings…", "Открыть настройки…"},
+	msgTrayLog:                    {"Log", "Журнал"},
 	msgTrayShowLog:                {"Show the log", "Показать журнал"},
+	msgTrayShowVerboseLog:         {"Show the verbose log", "Показать подробный журнал"},
 	msgTrayHide:                   {"Hide the icon", "Скрыть значок"},
 }

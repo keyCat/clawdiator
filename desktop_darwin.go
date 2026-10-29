@@ -24,12 +24,6 @@ func runAsAdministrator(user string, command ...string) error {
 	return exec.Command("osascript", "-e", script).Run()
 }
 
-// openTerminal opens a Terminal window that runs the command.
-func openTerminal(command string) error {
-	script := "tell application \"Terminal\"\nactivate\ndo script " + quoteAppleScript(command) + "\nend tell"
-	return exec.Command("osascript", "-e", script).Run()
-}
-
 // openLogFile opens the log in the Console app.
 func openLogFile(path string) error {
 	return exec.Command("open", "-a", "Console", path).Run()

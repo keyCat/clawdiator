@@ -101,7 +101,8 @@ To change a setting, run `install` again with the option. The other settings sta
 | `clawdiator version` | Shows the version. |
 | `clawdiator help` | Shows the help. |
 
-The menu of the tray icon also has "Check now", "Pause", the setting of the notices after a wake, and "Show the log".
+The menu of the tray icon also has "Check now", "Pause", the setting of the notices after a wake, and "Log".
+"Log" opens the log or the verbose log in the Console app. The last line of the menu shows the version.
 "Hide the icon" removes the icon until the next login. The notices continue. `clawdiator agent --show` shows the icon again.
 
 The text of the tool is in English or in Russian, the same as the language of macOS. To select a language, set `CLAWDIATOR_LANG` to `en` or `ru`.
