@@ -124,6 +124,8 @@ CAUTION: The verbose log contains the public IP address of the computer. Do not 
 
 The service checks GitHub for a new version 5 minutes after its start, and then every 6 hours.
 It does not install a new version without your permission.
+The changes of each version are in the changelog: https://github.com/keyCat/clawdiator/blob/main/CHANGELOG.md
+They are also on the release page: https://github.com/keyCat/clawdiator/releases
 
 When a new version is available, you see these signs:
 
@@ -141,10 +143,15 @@ sudo clawdiator update
 Type your password. The command downloads the version from GitHub and checks it with `SHA256SUMS`. Then it installs the version, and the settings stay.
 If the consent text changed, the command shows the new text. Type `yes` to agree. After the update, a notice shows the new version.
 
+The checksum finds a damaged download. It does not find a changed release, because `SHA256SUMS` comes from the same GitHub release.
+
 To check now, select "Check for updates" in the tray menu, or run `clawdiator update --check`. The service accepts 1 such request in 5 seconds.
 A notice or the command then shows the result.
 
 ### Automatic updates
+
+CAUTION: If an automatic install fails after it stops the old service, the Mac has no service and no block.
+Then run `sudo clawdiator update`. The error is in `/Library/Application Support/clawdiator/update.log`.
 
 The automatic updates are off by default. To turn them on, select "Install updates automatically" in the tray menu. Then type your password.
 You can also use this command. Use `off` to turn them off again.
@@ -188,7 +195,7 @@ The service sends the public IP address of the computer to these services, and t
 - Cloudflare: 1 request every 30 seconds.
 - ipwho.is and geojs.io: 1 request for each full check.
 - db-ip.com: 1 download of the country database each month.
-- github.com: 1 request every 6 hours for the newest version, and the download of each new version that the tool installs.
+- github.com: 1 request every 6 hours for the newest version. The tool also downloads from github.com each new version that it installs.
 
 The service sends no other data. It reads no traffic of the computer.
 
@@ -217,6 +224,10 @@ To build the release archives with the checks of a release, run this command. Th
 ```sh
 scripts/build-release.sh v0.1.0
 ```
+
+Before you push a tag, add the section of the version to `CHANGELOG.md`.
+The workflow "Release" uses this section as the text of the release. Without the section, the workflow stops.
+To see the text, run `scripts/release-notes.sh v0.1.0`.
 
 To run the tests, run `go test ./...`. The tests do not change the system and send no requests to the internet.
 To also send real requests to the location services, set `CLAWDIATOR_NETWORK_TEST=1`.
