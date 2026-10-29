@@ -62,6 +62,8 @@ func startTray(paths appPaths) {
 	settingsItem := systray.AddMenuItem(text(msgTraySettings), "")
 	logItem := systray.AddMenuItem(text(msgTrayShowLog), "")
 	hideItem := systray.AddMenuItem(text(msgTrayHide), "")
+	systray.AddSeparator()
+	systray.AddMenuItem(appName+" "+version, "").Disable()
 
 	go onClick(checkItem, func() {
 		if _, err := sendCommand(paths.CheckSocket, commandRequest{Command: socketCheck}); err != nil {

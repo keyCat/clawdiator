@@ -32,7 +32,7 @@ func commandAgent(paths appPaths, args []string) error {
 	logPath := filepath.Join(userDir, "agent.log")
 	settings, isFirstRun := loadAgentSettings(settingsPath)
 	model := newAgentModel(settings)
-	logAgent(logPath, "start, process %d, first run: %v", os.Getpid(), isFirstRun)
+	logAgent(logPath, "start, version %s, process %d, first run: %v", version, os.Getpid(), isFirstRun)
 	// The watch gives a notice soon after each save of the service. The poll every 2 seconds is the backup.
 	changes := watchFiles(context.Background(), paths.State)
 	for {

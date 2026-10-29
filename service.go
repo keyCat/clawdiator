@@ -700,6 +700,7 @@ func runService(ctx context.Context, paths appPaths) error {
 	}
 	driver.debugf("service", "start: version %s, process %d, services %s, minimum replies %d, blocked countries %v, last event %d, local database %s",
 		version, os.Getpid(), strings.Join(geocheck.ServiceNames(checkOptions.Services), ","), checkOptions.MinReplies, cfg.BlockedCountries, state.LastEventSeq, db.describe())
+	_ = appendLog(paths.Log, []string{time.Now().Format(time.RFC3339) + " all start version " + version})
 	if dbErr != nil {
 		driver.debugf("dbip", "cannot open a file: %v", dbErr)
 	}
