@@ -24,7 +24,7 @@ const (
 	saveInterval = 30 * time.Second
 	// userCheckInterval is the minimum time between 2 full checks that a user starts.
 	// Any user can send the check command, so the limit protects the request limits of the location services.
-	userCheckInterval = 30 * time.Second
+	userCheckInterval = 5 * time.Second
 )
 
 // probeDone and checkDone carry the results of the goroutines back to the loop.

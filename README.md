@@ -95,7 +95,7 @@ To change a setting, run `install` again with the option. The other settings sta
 | Command | Action |
 |---|---|
 | `clawdiator status` | Shows the state of the service, the country, the block of each provider and the last lines of the log. `--verbose` shows the verbose log. |
-| `clawdiator check` | Asks the service for a full check now. The service accepts 1 check in 30 seconds. |
+| `clawdiator check` | Asks the service for a full check now. The service accepts 1 check in 5 seconds. |
 | `sudo clawdiator pause --for 2h` | Stops the block for a time, for example `30m`, `4h` or `3d`. `--forever` gives a pause with no end. |
 | `sudo clawdiator resume` | Stops the pause. Then the service checks the country again. |
 | `clawdiator version` | Shows the version. |

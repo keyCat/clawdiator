@@ -11,11 +11,13 @@ const (
 	// probeServiceName is the location service of the probe. Its trace gives the public IP address and the country.
 	probeServiceName = "cloudflare"
 	// lookupTimeout is the time limit for each request of the probe and of the full check.
-	// A pre-block lasts until a full check passes, so a slow service must not stop the check for long.
-	lookupTimeout = 3 * time.Second
+	// A pre-block lasts until a full check passes, and some networks and VPNs drop the requests to a service.
+	// A request on a new connection needs about 4 round trips, so 1.5 seconds allows a round trip of about 350 ms.
+	// Outside a pre-block, a failed full check blocks. So a shorter limit can block a user on a slow network.
+	lookupTimeout = 1500 * time.Millisecond
 	// lookupExtraWait is the maximum time to wait for the other services after the minimum of correct replies.
 	// The full check always waits for the probe service, because the local database needs its IP address.
-	lookupExtraWait = time.Second
+	lookupExtraWait = 300 * time.Millisecond
 )
 
 // addProbeService adds the probe service to the services of the full check, if it is not there.

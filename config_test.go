@@ -1,12 +1,16 @@
 package main
 
 import (
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
-	"time"
 
 	"clawdiator/internal/geocheck"
 )
@@ -30,12 +34,40 @@ func TestGetGeoOptions(t *testing.T) {
 			t.Errorf("%+v must give a translated error: %v", cfg, err)
 		}
 	}
-	if options.Timeout != 3*time.Second || options.ExtraWait != time.Second || !slices.Equal(options.WaitFor, []string{probeServiceName}) {
+	if options.Timeout != lookupTimeout || options.ExtraWait != lookupExtraWait || !slices.Equal(options.WaitFor, []string{probeServiceName}) {
 		t.Errorf("the full check must stop the slow services, but wait for the probe service: %v, %v, %v", options.Timeout, options.ExtraWait, options.WaitFor)
 	}
 	probe := getProbeOptions()
-	if len(probe.Services) != 1 || probe.Services[0].Name != probeServiceName || probe.MinReplies != 1 || probe.Rounds != 1 || probe.Timeout != 3*time.Second {
+	if len(probe.Services) != 1 || probe.Services[0].Name != probeServiceName || probe.MinReplies != 1 || probe.Rounds != 1 || probe.Timeout != lookupTimeout {
 		t.Errorf("the probe options = %+v", probe)
+	}
+}
+
+// TestLookupClientOpensNewConnections checks that a check after a change of the network cannot use an old connection.
+func TestLookupClientOpensNewConnections(t *testing.T) {
+	options, _ := getGeoOptions(&Config{})
+	if options.Client != lookupClient || getProbeOptions().Client != lookupClient {
+		t.Fatal("the full check and the probe must use lookupClient")
+	}
+	var connections atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			connections.Add(1)
+		}
+	}
+	server.Start()
+	defer server.Close()
+	for range 2 {
+		response, err := lookupClient.Get(server.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, response.Body)
+		_ = response.Body.Close()
+	}
+	if count := connections.Load(); count != 2 {
+		t.Errorf("2 requests opened %d connections, want 2", count)
 	}
 }
 

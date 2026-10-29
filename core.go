@@ -20,14 +20,14 @@ const (
 	// probeFailureCheckInterval is the minimum time between 2 full checks that a failed probe starts.
 	probeFailureCheckInterval = 5 * time.Minute
 	// retryInterval is the time before the next full check after a failed full check, when no pre-block is on.
-	retryInterval = 30 * time.Second
+	retryInterval = 10 * time.Second
 	// slowRetryInterval replaces the other waits after many failed full checks in a row.
 	// Many fast retries can go above the request limits of the location services.
 	slowRetryInterval = 5 * time.Minute
 	// slowRetryAfter is the number of failed full checks in a row, without a pre-block, before the slow retries.
 	slowRetryAfter = 4
-	// preBlockSlowRetryAfter is the same number during a pre-block.
-	preBlockSlowRetryAfter = 10
+	// preBlockSlowRetryAfter is the same number during a pre-block. With preBlockRetryDelays, the fast retries last about 3 minutes.
+	preBlockSlowRetryAfter = 20
 	// wakeGap is the gap between 2 ticks that counts as a wake from sleep.
 	// The driver calls tick every 250 milliseconds, so a longer gap means that the computer slept.
 	wakeGap = 30 * time.Second
@@ -50,7 +50,7 @@ const (
 
 // preBlockRetryDelays are the waits after the first failed full checks during a pre-block.
 // The pre-block stops all access, so the service tries again soon. After the list, it waits the last value.
-var preBlockRetryDelays = []time.Duration{5 * time.Second, 10 * time.Second, 20 * time.Second, 30 * time.Second}
+var preBlockRetryDelays = []time.Duration{time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second}
 
 // getRetryDelay returns the wait after the failed full check with the number failures in a row.
 func getRetryDelay(failures int, isPreBlocked bool) time.Duration {

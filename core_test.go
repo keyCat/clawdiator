@@ -259,14 +259,15 @@ func TestLookupFailureWithoutChangeBlocks(t *testing.T) {
 }
 
 // After a change of the network, a failed full check keeps the pre-block.
-// The pre-block stops all access, so the first retries come soon. They slow down after 10 failures.
+// The pre-block stops all access, so the first retries come soon. They slow down after 20 failures.
 func TestLookupFailureAfterChangeKeepsPreBlock(t *testing.T) {
 	s := newSimulation(t)
 	check := mustFindCheck(t, s.runUntil(testStart))
-	wantDelays := []time.Duration{
-		5 * time.Second, 10 * time.Second, 20 * time.Second, 30 * time.Second, 30 * time.Second,
-		30 * time.Second, 30 * time.Second, 30 * time.Second, 30 * time.Second, 5 * time.Minute,
+	wantDelays := []time.Duration{time.Second, 2 * time.Second, 5 * time.Second}
+	for len(wantDelays) < 19 {
+		wantDelays = append(wantDelays, 10*time.Second)
 	}
+	wantDelays = append(wantDelays, 5*time.Minute)
 	for index, wantDelay := range wantDelays {
 		failure := index + 1
 		failedAt := s.now
@@ -278,7 +279,7 @@ func TestLookupFailureAfterChangeKeepsPreBlock(t *testing.T) {
 			t.Fatalf("failure %d: the next retry = %v, want %v later", failure, s.c.nextRetry, wantDelay)
 		}
 		// The probes continue during the wait. They must not start a full check before the retry.
-		if early := s.runUntil(failedAt.Add(wantDelay - 2*time.Second)); len(early) != 0 {
+		if early := s.runUntil(failedAt.Add(wantDelay - tickInterval)); len(early) != 0 {
 			t.Fatalf("failure %d: a full check started before the retry: %+v", failure, early)
 		}
 		checks := s.runUntil(failedAt.Add(wantDelay))
@@ -302,15 +303,15 @@ func TestGetRetryDelay(t *testing.T) {
 		isPreBlocked bool
 		want         time.Duration
 	}{
-		{1, false, 30 * time.Second},
-		{3, false, 30 * time.Second},
+		{1, false, 10 * time.Second},
+		{3, false, 10 * time.Second},
 		{4, false, 5 * time.Minute},
-		{1, true, 5 * time.Second},
-		{2, true, 10 * time.Second},
-		{3, true, 20 * time.Second},
-		{4, true, 30 * time.Second},
-		{9, true, 30 * time.Second},
-		{10, true, 5 * time.Minute},
+		{1, true, time.Second},
+		{2, true, 2 * time.Second},
+		{3, true, 5 * time.Second},
+		{4, true, 10 * time.Second},
+		{19, true, 10 * time.Second},
+		{20, true, 5 * time.Minute},
 	}
 	for _, testCase := range cases {
 		if got := getRetryDelay(testCase.failures, testCase.isPreBlocked); got != testCase.want {

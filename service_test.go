@@ -418,7 +418,7 @@ func TestDriverVerboseLog(t *testing.T) {
 		"cloudflare: DE",
 		"check generation 1 failed in",
 		"ipinfo.io: HTTP 429",
-		"core failed full checks in a row: 1. The next retry is in 5s. Pre-block: true",
+		"core failed full checks in a row: 1. The next retry is in 1s. Pre-block: true",
 		"all pre-block the network changed",
 		"command check from user \"ivan\": ok",
 	} {

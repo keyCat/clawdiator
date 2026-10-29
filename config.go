@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,7 +89,7 @@ func getGeoOptions(cfg *Config) (geocheck.Options, error) {
 		return geocheck.Options{}, errorf(msgMinRepliesInvalid, len(services))
 	}
 	return geocheck.Options{
-		Services: addProbeService(services), MinReplies: minReplies, UserAgent: appName,
+		Services: addProbeService(services), MinReplies: minReplies, UserAgent: appName, Client: lookupClient,
 		Timeout: lookupTimeout, ExtraWait: lookupExtraWait, WaitFor: []string{probeServiceName},
 	}, nil
 }
@@ -96,8 +97,16 @@ func getGeoOptions(cfg *Config) (geocheck.Options, error) {
 // getProbeOptions returns the options of the probe: 1 request to the probe service, without a retry.
 func getProbeOptions() geocheck.Options {
 	services, _ := geocheck.FindServices([]string{probeServiceName})
-	return geocheck.Options{Services: services, MinReplies: 1, Rounds: 1, UserAgent: appName, Timeout: lookupTimeout}
+	return geocheck.Options{Services: services, MinReplies: 1, Rounds: 1, UserAgent: appName, Client: lookupClient, Timeout: lookupTimeout}
 }
+
+// lookupClient opens a new connection for each request. A kept connection can stay on the route from before
+// a change of the network. Then the checks after a start of a VPN still go out without the VPN.
+var lookupClient = func() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DisableKeepAlives = true
+	return &http.Client{Transport: transport}
+}()
 
 func isCountryCode(code string) bool {
 	return len(code) == 2 && code[0] >= 'A' && code[0] <= 'Z' && code[1] >= 'A' && code[1] <= 'Z'
