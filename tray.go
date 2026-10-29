@@ -88,7 +88,12 @@ func startTray(paths appPaths) {
 	go onClick(showLogItem, func() { _ = openLogFile(paths.Log) })
 	go onClick(showVerboseLogItem, func() { _ = openLogFile(paths.DebugLog) })
 	// The update needs the password and can show a new consent text, so it runs in Terminal.
-	go onClick(updateItem, func() { _ = openTerminal("sudo " + quoteShell(paths.Binary) + " update") })
+	go onClick(updateItem, func() {
+		// macOS can refuse the control of Terminal. Then the notice gives the command.
+		if err := openTerminal("sudo " + quoteShell(paths.Binary) + " update"); err != nil {
+			_ = showNotice(text(msgTerminalNotOpened, err))
+		}
+	})
 	go onClick(websiteItem, func() { _ = openURL(websiteURL) })
 	go onClick(autoUpdateItem, func() {
 		value := "on"

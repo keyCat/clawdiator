@@ -35,16 +35,20 @@ func commandAgent(paths appPaths, args []string) error {
 	logAgent(logPath, "start, version %s, process %d, first run: %v", version, os.Getpid(), isFirstRun)
 	// The watch gives a notice soon after each save of the service. The poll every 2 seconds is the backup.
 	changes := watchFiles(context.Background(), paths.State)
+	isSettingsSaved := false
 	for {
 		// The tray changes agent.json, so the agent reads it again at each pass.
 		settings, _ = loadAgentSettings(settingsPath)
 		model.settings = settings
-		for _, next := range model.update(time.Now(), readServiceState(paths.State), isFirstRun) {
+		state := readServiceState(paths.State)
+		for _, next := range model.update(time.Now(), state, isFirstRun) {
 			err := showNotice(next.Text)
 			logAgent(logPath, "notice %q, error: %v", next.Text, err)
 		}
-		if isFirstRun || settings.Version != version {
-			isFirstRun = false
+		// The model shows the start notices only with a state. So the agent saves the first run and the version
+		// only after such a pass, and only 1 time, so that a failed save does not fill the log.
+		if state != nil && !isSettingsSaved && (isFirstRun || settings.Version != version) {
+			isFirstRun, isSettingsSaved = false, true
 			settings.Version = version
 			if err := saveAgentSettings(settingsPath, settings); err != nil {
 				logAgent(logPath, "cannot save %s: %v", settingsPath, err)

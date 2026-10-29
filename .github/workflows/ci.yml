@@ -48,4 +48,4 @@ jobs:
           done
 
       - name: Build the release archives
-        run: scripts/build-release.sh v0.0.0-ci
+        run: scripts/build-release.sh v0.0.0

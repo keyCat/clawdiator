@@ -238,6 +238,8 @@ const (
 	msgAutoUpdateOff
 	msgStatusAutoUpdateOn
 	msgStatusAutoUpdateOff
+	msgUpdateRunning
+	msgTerminalNotOpened
 	messageCount
 )
 
@@ -503,8 +505,8 @@ Type "yes" to agree: `,
 	msgUpdateCheckFailed:    {"the tool did not find the newest version: %v", "программа не нашла новейшую версию: %v"},
 	msgUpdateDownloadFailed: {"the tool did not download the new version: %v", "программа не скачала новую версию: %v"},
 	msgNoticeUpdated:        {"clawdiator now has the version %s.", "Теперь у clawdiator версия %s."},
-	msgNoticeUpdateAvailable: {"clawdiator %[1]s is available. To install it, select \"Install %[1]s…\" in the menu of the icon. More: %[2]s",
-		"Доступен clawdiator %[1]s. Чтобы установить его, выберите \"Установить %[1]s…\" в меню значка. Подробнее: %[2]s"},
+	msgNoticeUpdateAvailable: {"clawdiator %[1]s is available. To install it, select \"Install %[1]s…\" in the menu of the icon, or run \"sudo clawdiator update\" in Terminal. More: %[2]s",
+		"Доступен clawdiator %[1]s. Чтобы установить его, выберите \"Установить %[1]s…\" в меню значка или выполните \"sudo clawdiator update\" в Терминале. Подробнее: %[2]s"},
 	msgStatusUpdate: {"New version: %s. To install it, run \"sudo clawdiator update\". More: %s",
 		"Новая версия: %s. Чтобы установить её, выполните \"sudo clawdiator update\". Подробнее: %s"},
 	msgTrayCheckUpdate: {"Check for updates", "Проверить обновления"},
@@ -528,4 +530,8 @@ Type "yes" to agree: `,
 	msgStatusAutoUpdateOn: {"Automatic updates: on.", "Автоматические обновления: включены."},
 	msgStatusAutoUpdateOff: {"Automatic updates: off. To turn them on, run \"sudo clawdiator update --auto-install on\".",
 		"Автоматические обновления: выключены. Чтобы включить их, выполните \"sudo clawdiator update --auto-install on\"."},
+	msgUpdateRunning: {"The service installs a new version now. A notice comes after the update.",
+		"Служба устанавливает новую версию сейчас. После обновления придёт уведомление."},
+	msgTerminalNotOpened: {"The tray did not open Terminal: %v. Run \"sudo clawdiator update\" in Terminal.",
+		"Значок не открыл Терминал: %v. Выполните \"sudo clawdiator update\" в Терминале."},
 }

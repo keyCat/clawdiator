@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-var formatVerbPattern = regexp.MustCompile(`%[-+# 0-9.]*[a-zA-Z%]`)
+var formatVerbPattern = regexp.MustCompile(`%[-+# 0-9.*\[\]]*[a-zA-Z%]`)
 
 func TestMessagesComplete(t *testing.T) {
 	for key := messageKey(0); key < messageCount; key++ {

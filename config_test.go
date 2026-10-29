@@ -38,7 +38,7 @@ func TestGetGeoOptions(t *testing.T) {
 		t.Errorf("the full check must stop the slow services, but wait for the probe service: %v, %v, %v", options.Timeout, options.ExtraWait, options.WaitFor)
 	}
 	probe := getProbeOptions()
-	if len(probe.Services) != 1 || probe.Services[0].Name != probeServiceName || probe.MinReplies != 1 || probe.Rounds != 1 || probe.Timeout != lookupTimeout {
+	if len(probe.Services) != 1 || probe.Services[0].Name != probeServiceName || probe.MinReplies != 1 || probe.Rounds != 1 || probe.Timeout != quickLookupTimeout {
 		t.Errorf("the probe options = %+v", probe)
 	}
 }

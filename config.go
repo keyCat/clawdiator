@@ -99,7 +99,7 @@ func getGeoOptions(cfg *Config) (geocheck.Options, error) {
 // getProbeOptions returns the options of the probe: 1 request to the probe service, without a retry.
 func getProbeOptions() geocheck.Options {
 	services, _ := geocheck.FindServices([]string{probeServiceName})
-	return geocheck.Options{Services: services, MinReplies: 1, Rounds: 1, UserAgent: appName, Client: lookupClient, Timeout: lookupTimeout}
+	return geocheck.Options{Services: services, MinReplies: 1, Rounds: 1, UserAgent: appName, Client: lookupClient, Timeout: quickLookupTimeout}
 }
 
 // lookupClient opens a new connection for each request. A kept connection can stay on the route from before

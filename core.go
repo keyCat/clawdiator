@@ -84,6 +84,8 @@ type action struct {
 	Rounds int
 	// Reason tells why the core started the full check. The verbose log shows it.
 	Reason string
+	// IsPreBlock tells that a pre-block is on. Then the full check uses the short time limits.
+	IsPreBlock bool
 }
 
 // core holds the logic of the service. It reads no clock, so the tests can drive it with fixed times.
@@ -250,7 +252,7 @@ func (c *core) startCheck(reason string) action {
 	if c.state.IsPreBlocked {
 		rounds = preBlockRounds
 	}
-	return action{Kind: actionFullCheck, Generation: c.generation, Rounds: rounds, Reason: reason}
+	return action{Kind: actionFullCheck, Generation: c.generation, Rounds: rounds, Reason: reason, IsPreBlock: c.state.IsPreBlocked}
 }
 
 // requestCheck starts a full check, if no full check of the current generation runs.

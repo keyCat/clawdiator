@@ -82,14 +82,19 @@ type updateDone struct {
 
 // updater holds the steps of the automatic update. The tests replace them, so the tests use no network and no launchd.
 type updater struct {
-	// clean removes the job and the folder of the last update.
-	clean func()
+	// clean removes the job and the folder of the last update. It gives an error if the job still runs.
+	clean func() error
 	// latest returns the tag of the newest release.
 	latest func(ctx context.Context) (string, error)
 	// prepare downloads the release of the tag and asks the new binary about itself.
 	prepare func(ctx context.Context, tag string) (updateInfo, error)
 	// start starts the install of the new binary in a separate job. The install stops this service.
 	start func(binary string) error
+}
+
+// updateJobFailed tells that the job of an automatic install did not start.
+type updateJobFailed struct {
+	Err error
 }
 
 // serviceDriver connects the core to the system. Only the goroutine of run calls its methods,
@@ -144,6 +149,10 @@ type serviceDriver struct {
 	update          updater
 	isUpdateRunning bool
 	nextUpdateCheck time.Time
+	// updateJob is the version that the update job installs, and updateJobStart is the start of the job.
+	// A successful install stops this service. So a service that still runs after updateJobTimeout knows that the install failed.
+	updateJob      string
+	updateJobStart time.Time
 
 	// isFirewallKnown tells if the service applied the firewall rules after its start.
 	isFirewallKnown       bool
@@ -178,7 +187,7 @@ func newServiceDriver(ctx context.Context, c *core, paths appPaths, checkOptions
 	driver.currentVersion = version
 	updateDir := filepath.Join(paths.Dir, "update")
 	driver.update = updater{
-		clean:   func() { cleanUpdate(updateDir) },
+		clean:   func() error { return cleanUpdate(updateDir) },
 		latest:  func(ctx context.Context) (string, error) { return fetchLatestVersion(ctx, releasesURL) },
 		prepare: func(ctx context.Context, tag string) (updateInfo, error) { return prepareUpdate(ctx, updateDir, tag) },
 		start:   func(binary string) error { return startUpdateJob(paths, binary) },
@@ -290,6 +299,12 @@ func (d *serviceDriver) startUpdateCheck() {
 	if d.nextUpdateCheck.IsZero() {
 		d.nextUpdateCheck = now.Add(updateFirstCheckDelay)
 	}
+	if !d.updateJobStart.IsZero() {
+		if now.Sub(d.updateJobStart) < updateJobTimeout {
+			return
+		}
+		d.failUpdateJob(now, fmt.Sprintf("the automatic install of %s did not end in %v. Read update.log", d.updateJob, updateJobTimeout))
+	}
 	if d.isUpdateRunning || now.Before(d.nextUpdateCheck) || !tagPattern.MatchString(d.currentVersion) {
 		return
 	}
@@ -304,7 +319,10 @@ func (d *serviceDriver) startUpdateCheck() {
 	d.spawn(func() {
 		ctx, cancel := context.WithTimeout(d.ctx, updateTimeout)
 		defer cancel()
-		d.update.clean()
+		if done.Err = d.update.clean(); done.Err != nil {
+			d.sendResult(done)
+			return
+		}
 		done.Latest, done.Err = d.update.latest(ctx)
 		// Without automatic updates, the service only tells about a new version. It downloads nothing.
 		if done.Err == nil && done.IsAuto && isNewerVersion(done.Latest, d.currentVersion) && done.Latest != consentTag {
@@ -335,6 +353,12 @@ func (d *serviceDriver) handleUpdate(now time.Time, done updateDone) {
 		state.ConsentTag = done.Latest
 		d.core.addEvent(now, event{Kind: eventUpdateNeeded, Version: done.Latest})
 	default:
+		// The download can take minutes. The user can turn the setting off during this time, so the service reads it again.
+		if cfg, err := loadConfig(d.paths.Config); err != nil || !cfg.AutoUpdate {
+			state.IsAuto = false
+			d.debugf("update", "the automatic updates are off now, so the service does not install %s", done.Latest)
+			break
+		}
 		d.debugf("update", "start the install of %s from %s", done.Latest, done.Info.Binary)
 		d.core.addEvent(now, event{Kind: eventUpdate, Version: done.Latest})
 		isInstall = true
@@ -342,10 +366,25 @@ func (d *serviceDriver) handleUpdate(now time.Time, done updateDone) {
 	// A forced check waits for the result in state.json, and the install stops the service. So the state goes to the disk at once.
 	d.afterStep(true)
 	if isInstall {
-		if err := d.update.start(done.Info.Binary); err != nil {
-			d.core.addError(now, "the automatic update to "+done.Latest+" did not start: "+err.Error())
-		}
+		d.updateJob, d.updateJobStart = done.Latest, now
+		binary := done.Info.Binary
+		// The start can try for some seconds. The loop must handle the network and the sleep during this time.
+		d.spawn(func() {
+			if err := d.update.start(binary); err != nil {
+				d.sendResult(updateJobFailed{Err: err})
+			}
+		})
 	}
+}
+
+// failUpdateJob records a failed automatic install. The error makes the new version wait for the user,
+// so the tray shows the dot and the agent shows the reminder.
+func (d *serviceDriver) failUpdateJob(now time.Time, message string) {
+	d.debugf("update", "%s", message)
+	d.core.state.Update.Error = message
+	d.updateJob, d.updateJobStart = "", time.Time{}
+	_ = appendLog(d.paths.Log, []string{now.Format(time.RFC3339) + " all update-failed " + cleanLogText(message)})
+	d.afterStep(true)
 }
 
 // setCountryDB starts to use the local database. The status command shows it.
@@ -399,6 +438,8 @@ func (d *serviceDriver) handleResult(result any) {
 	case updateDone:
 		d.isUpdateRunning = false
 		d.handleUpdate(now, done)
+	case updateJobFailed:
+		d.failUpdateJob(now.Round(0), "the automatic install of "+d.updateJob+" did not start: "+done.Err.Error())
 	case dbDone:
 		d.isDBDownloadRunning = false
 		if done.Err != nil {
@@ -437,6 +478,9 @@ func (d *serviceDriver) answerRequest(received commandRequest) commandResponse {
 			return commandResponse{Code: codeTooSoon}
 		}
 		d.lastUpdateRequest = now
+		if !d.updateJobStart.IsZero() {
+			return commandResponse{Code: codeUpdateRunning}
+		}
 		// A running check gives its result soon. The client waits for it.
 		if !d.isUpdateRunning {
 			d.nextUpdateCheck = now.Round(0)
@@ -527,6 +571,9 @@ func (d *serviceDriver) runProbe(generation int, db *countryDB) {
 func (d *serviceDriver) runCheck(ctx context.Context, next action, db *countryDB, blockedCountries []string) {
 	options := d.checkOptions
 	options.Rounds = next.Rounds
+	if next.IsPreBlock {
+		options.Timeout, options.ExtraWait = quickLookupTimeout, quickExtraWait
+	}
 	options.OnReply = d.newReplyHook(next.Generation, db, blockedCountries)
 	if db != nil {
 		options.MinReplies = max(1, options.MinReplies-1)

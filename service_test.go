@@ -107,7 +107,7 @@ func newTestDriver(t *testing.T) *testDriver {
 	// The tests never use the network. A test of the local database replaces this function.
 	td.downloadDB = func(context.Context, string) (*countryDB, error) { return nil, errOffline }
 	td.update = updater{
-		clean:   func() {},
+		clean:   func() error { return nil },
 		latest:  func(context.Context) (string, error) { return "", errOffline },
 		prepare: func(context.Context, string) (updateInfo, error) { return updateInfo{}, errOffline },
 		start:   func(string) error { return errOffline },
@@ -211,6 +211,9 @@ func TestDriverDoesNotWaitForSlowFullCheck(t *testing.T) {
 	if check.options.Rounds != preBlockRounds || !slices.Contains(geocheck.ServiceNames(check.options.Services), probeServiceName) {
 		t.Errorf("the full check options = %+v", check.options)
 	}
+	if check.options.Timeout != quickLookupTimeout || check.options.ExtraWait != quickExtraWait {
+		t.Errorf("a check during a pre-block must use the short limits: %v, %v", check.options.Timeout, check.options.ExtraWait)
+	}
 	for second := 2; second <= 40; second += 2 {
 		td.step()
 	}
@@ -277,7 +280,10 @@ func TestDriverUserCheck(t *testing.T) {
 	if response := td.handleRequest(commandRequest{Command: socketCheck}); response.Code != codeOK {
 		t.Errorf("a user check after 30 seconds = %+v", response)
 	}
-	td.nextCheck()
+	// Without a pre-block, the access stays open, so the check waits longer for slow services.
+	if steady := td.nextCheck(); steady.options.Timeout != lookupTimeout || steady.options.ExtraWait != lookupExtraWait {
+		t.Errorf("a check without a pre-block must use the normal limits: %v, %v", steady.options.Timeout, steady.options.ExtraWait)
+	}
 }
 
 func TestDriverPauseRequests(t *testing.T) {

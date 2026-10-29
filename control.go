@@ -28,6 +28,8 @@ const (
 	codeServiceTimeout = "timeout"
 	// codeLocalBuild tells that the service is a local build, so it does not update itself.
 	codeLocalBuild = "local_build"
+	// codeUpdateRunning tells that the service installs a new version now.
+	codeUpdateRunning = "update_running"
 )
 
 // commandTimeout is the time limit of 1 command on a socket.

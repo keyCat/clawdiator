@@ -8,13 +8,11 @@ set -eu
 export LC_ALL=C
 
 version="${1:-}"
-case "$version" in
-v[0-9]*) ;;
-*)
-	echo "Give the version as the first argument, for example v0.1.0." >&2
+# The update check of the tool accepts only this form. A release with another tag would stop the check of all users.
+if ! printf '%s' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+	echo "Give the version as the first argument in the form vX.Y.Z, for example v0.1.0." >&2
 	exit 2
-	;;
-esac
+fi
 
 # Go 1.26 is the last Go that runs on macOS 12 Monterey. Go 1.27 needs macOS 13.
 # So the release uses Go 1.26, and the tray gets the same minimum macOS version.

@@ -41,6 +41,8 @@ const (
 	maxArchiveSize = 100 << 20
 	// updateWaitTimeout is the maximum wait of "update --check" and of the tray for the result of the check.
 	updateWaitTimeout = 2 * time.Minute
+	// updateJobTimeout is the maximum time of the update job. A successful install stops the old service before this time.
+	updateJobTimeout = 5 * time.Minute
 )
 
 // tagPattern is the only accepted form of a release tag. The tag goes into a URL, a path, a plist and the logs.
@@ -130,7 +132,9 @@ func downloadFile(ctx context.Context, url string, maxSize int64) ([]byte, error
 		return nil, err
 	}
 	request.Header.Set("User-Agent", appName+"/"+version)
-	response, err := lookupClient.Do(request)
+	client := *lookupClient
+	client.CheckRedirect = checkGitHubRedirect
+	response, err := client.Do(request)
 	if err != nil {
 		return nil, err
 	}
@@ -143,6 +147,19 @@ func downloadFile(ctx context.Context, url string, maxSize int64) ([]byte, error
 		err = fmt.Errorf("%s is larger than %d bytes", url, maxSize)
 	}
 	return data, err
+}
+
+// checkGitHubRedirect lets a download follow only https redirects to the hosts of GitHub. GitHub sends the files of a release
+// from release-assets.githubusercontent.com.
+func checkGitHubRedirect(request *http.Request, via []*http.Request) error {
+	host := request.URL.Hostname()
+	if request.URL.Scheme != "https" || (host != "github.com" && !strings.HasSuffix(host, ".githubusercontent.com")) {
+		return fmt.Errorf("the download redirects to %s, which is not GitHub", request.URL.Redacted())
+	}
+	if len(via) >= 10 {
+		return errors.New("the download has more than 10 redirects")
+	}
+	return nil
 }
 
 // extractBinaries writes the 2 binaries of the archive into dir. It takes only regular files with the exact names,
@@ -228,10 +245,14 @@ func prepareUpdate(ctx context.Context, dir, tag string) (updateInfo, error) {
 	return info, err
 }
 
-// cleanUpdate removes the job and the folder of the last update.
-func cleanUpdate(dir string) {
+// cleanUpdate removes the job and the folder of the last update. A job that still runs installs a version now,
+// for example the job that started this service. A stop of this job would leave a half install, so the function stops.
+func cleanUpdate(dir string) error {
+	if output, err := runCommand("launchctl", "print", "system/"+updateLabel); err == nil && strings.Contains(output, "state = running") {
+		return errors.New("the install of the last update still runs")
+	}
 	_, _ = runCommand("launchctl", "bootout", "system/"+updateLabel)
-	_ = os.RemoveAll(dir)
+	return os.RemoveAll(dir)
 }
 
 // startUpdateJob starts "install --unattended" of the new binary as a one-shot LaunchDaemon. The output goes to update.log.
@@ -305,7 +326,9 @@ func (in *installer) commandUpdate(args []string) error {
 		return nil
 	}
 	fmt.Fprintln(in.stdout, text(msgUpdateDownload, tag))
-	dir, err := os.MkdirTemp("", appName+"-update-")
+	// Root runs the new binary. A folder in TMPDIR can be in the folder of a user, who can then replace the binary.
+	// Only root can write in the app folder. The automatic update uses the folder "update", so this folder has another name.
+	dir, err := os.MkdirTemp(in.paths.Dir, "manual-update-")
 	if err != nil {
 		return err
 	}
@@ -313,6 +336,9 @@ func (in *installer) commandUpdate(args []string) error {
 	binary, err := downloadRelease(ctx, releasesURL, tag, runtime.GOARCH, dir)
 	if err != nil {
 		return errorf(msgUpdateDownloadFailed, err)
+	}
+	if info, err := readUpdateInfo(ctx, binary); err != nil || info.Version != tag {
+		return errorf(msgUpdateDownloadFailed, fmt.Errorf("the binary of %s does not tell this version: %+v, %v", tag, info, err))
 	}
 	command := exec.Command(binary, "install")
 	command.Stdin, command.Stdout, command.Stderr = in.stdin, in.stdout, os.Stderr
@@ -359,6 +385,8 @@ func checkForUpdate(paths appPaths) (string, error) {
 		return "", errorf(msgCheckTooSoon, int(userCheckInterval.Seconds()))
 	case codeLocalBuild:
 		return "", errorf(msgUpdateLocalBuild)
+	case codeUpdateRunning:
+		return text(msgUpdateRunning), nil
 	default:
 		return "", errorf(msgUnexpectedAnswer, response.Code)
 	}

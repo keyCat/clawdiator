@@ -73,6 +73,7 @@ func TestFetchLatestVersion(t *testing.T) {
 
 type testArchiveEntry struct {
 	name, body, link string
+	isHardLink       bool
 }
 
 func buildTestArchive(t *testing.T, entries ...testArchiveEntry) []byte {
@@ -84,6 +85,9 @@ func buildTestArchive(t *testing.T, entries ...testArchiveEntry) []byte {
 		header := &tar.Header{Name: entry.name, Mode: 0o755, Size: int64(len(entry.body)), Typeflag: tar.TypeReg}
 		if entry.link != "" {
 			header = &tar.Header{Name: entry.name, Linkname: entry.link, Mode: 0o777, Typeflag: tar.TypeSymlink}
+			if entry.isHardLink {
+				header.Typeflag = tar.TypeLink
+			}
 		}
 		if err := tarWriter.WriteHeader(header); err != nil {
 			t.Fatal(err)
@@ -120,7 +124,15 @@ func TestDownloadRelease(t *testing.T) {
 	addRelease("v3.0.0", link, link)
 	noMain := buildTestArchive(t, testArchiveEntry{name: "clawdiator-tray", body: "new tray"})
 	addRelease("v4.0.0", noMain, noMain)
+	twice := buildTestArchive(t, testArchiveEntry{name: "clawdiator", body: "a"}, testArchiveEntry{name: "./clawdiator", body: "b"})
+	addRelease("v5.0.0", twice, twice)
+	hardLink := buildTestArchive(t, testArchiveEntry{name: "clawdiator", link: "/bin/sh", isHardLink: true})
+	addRelease("v6.0.0", hardLink, hardLink)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/releases/download/v7.0.0/SHA256SUMS" {
+			http.Redirect(w, r, "https://example.com/SHA256SUMS", http.StatusFound)
+			return
+		}
 		data, isFound := files[r.URL.Path]
 		if !isFound {
 			http.NotFound(w, r)
@@ -143,7 +155,7 @@ func TestDownloadRelease(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "README.md")); !os.IsNotExist(err) {
 		t.Errorf("only the 2 binaries must come out of the archive: %v", err)
 	}
-	for _, tag := range []string{"v2.0.0", "v3.0.0", "v4.0.0", "v1.0.0/../../x", "v9.0.0"} {
+	for _, tag := range []string{"v2.0.0", "v3.0.0", "v4.0.0", "v5.0.0", "v6.0.0", "v7.0.0", "v1.0.0/../../x", "v9.0.0"} {
 		dir := t.TempDir()
 		if _, err := downloadRelease(context.Background(), server.URL, tag, "arm64", dir); err == nil {
 			t.Errorf("%s must give an error", tag)
@@ -186,11 +198,12 @@ func TestDriverUpdatesItself(t *testing.T) {
 	latest, latestCalls, prepareCalls := "v0.1.2", 0, 0
 	info := updateInfo{Binary: "/update/clawdiator", Version: "v0.1.2", Consent: 4}
 	var started []string
+	starts := make(chan string, 4)
 	td.update = updater{
-		clean:   func() {},
+		clean:   func() error { return nil },
 		latest:  func(context.Context) (string, error) { latestCalls++; return latest, nil },
 		prepare: func(context.Context, string) (updateInfo, error) { prepareCalls++; return info, nil },
-		start:   func(binary string) error { started = append(started, binary); return nil },
+		start:   func(binary string) error { starts <- binary; return nil },
 	}
 	td.step()
 	if latestCalls != 0 {
@@ -198,6 +211,7 @@ func TestDriverUpdatesItself(t *testing.T) {
 	}
 	td.clock = td.clock.Add(updateFirstCheckDelay)
 	td.step()
+	started = append(started, receiveStarts(starts)...)
 	if update := td.core.state.Update; latestCalls != 1 || prepareCalls != 0 || len(started) != 0 || update.Latest != "v0.1.2" || update.IsAuto {
 		t.Fatalf("without automatic updates, the check must only record the new version: checks %d, downloads %d, starts %v, %+v",
 			latestCalls, prepareCalls, started, update)
@@ -206,6 +220,7 @@ func TestDriverUpdatesItself(t *testing.T) {
 	setAutoUpdate(true)
 	td.clock = td.clock.Add(updateCheckInterval)
 	td.step()
+	started = append(started, receiveStarts(starts)...)
 	if !slices.Equal(started, []string{"/update/clawdiator"}) || !td.core.state.Update.IsAuto {
 		t.Fatalf("with automatic updates, a newer version must start the install: %v, %+v", started, td.core.state.Update)
 	}
@@ -219,6 +234,7 @@ func TestDriverUpdatesItself(t *testing.T) {
 		td.clock = td.clock.Add(updateCheckInterval)
 		td.step()
 	}
+	started = append(started, receiveStarts(starts)...)
 	needed := 0
 	for _, change := range td.core.state.Events {
 		if change.Kind == eventUpdateNeeded && change.Version == "v0.1.2" {
@@ -264,6 +280,110 @@ func TestSetAutoUpdate(t *testing.T) {
 	in.isRoot = func() bool { return false }
 	if err := in.commandUpdate([]string{"--auto-install", "on"}); err == nil {
 		t.Error("--auto-install must need root, because the service installs as root")
+	}
+}
+
+// receiveStarts returns the binaries that the fake start got. The start runs in a goroutine, so the function waits a short time.
+func receiveStarts(starts chan string) []string {
+	var binaries []string
+	for {
+		select {
+		case binary := <-starts:
+			binaries = append(binaries, binary)
+		case <-time.After(100 * time.Millisecond):
+			return binaries
+		}
+	}
+}
+
+// TestDriverUpdateJob checks the job of an automatic install. While it runs, no check starts. A service that still runs
+// after updateJobTimeout, or a job that did not start, makes the version wait for the user. A setting that goes off
+// during the download stops the install, and a job of the last update that still runs stops the check.
+func TestDriverUpdateJob(t *testing.T) {
+	td := newTestDriver(t)
+	td.currentVersion = "v0.1.1"
+	if err := saveConfig(td.paths.Config, &Config{AutoUpdate: true, Consent: consent{Version: 4}}); err != nil {
+		t.Fatal(err)
+	}
+	checks, starts := 0, make(chan string, 4)
+	var startErr, cleanErr error
+	isTurnedOff := false
+	td.update = updater{
+		clean:  func() error { return cleanErr },
+		latest: func(context.Context) (string, error) { checks++; return "v0.1.2", nil },
+		prepare: func(context.Context, string) (updateInfo, error) {
+			if isTurnedOff {
+				_ = saveConfig(td.paths.Config, &Config{Consent: consent{Version: 4}})
+			}
+			return updateInfo{Binary: "/update/clawdiator", Version: "v0.1.2", Consent: 4}, nil
+		},
+		start: func(binary string) error { err := startErr; starts <- binary; return err },
+	}
+	forceCheck := func() commandResponse {
+		t.Helper()
+		td.clock = td.clock.Add(userCheckInterval)
+		response := td.handleRequest(commandRequest{Command: socketUpdateCheck})
+		td.drainProbes()
+		return response
+	}
+	td.step()
+	forceCheck()
+	if got := receiveStarts(starts); len(got) != 1 {
+		t.Fatalf("the forced check must start the install: %v", got)
+	}
+	if response := forceCheck(); response.Code != codeUpdateRunning || checks != 1 {
+		t.Errorf("during the install job, a forced check must start nothing: %s, checks %d", response.Code, checks)
+	}
+	td.clock = td.updateJobStart.Add(updateJobTimeout - time.Second)
+	td.step()
+	if checks != 1 || td.core.state.Update.Error != "" {
+		t.Fatalf("before the timeout of the job, nothing must change: checks %d, %+v", checks, td.core.state.Update)
+	}
+	td.clock = td.updateJobStart.Add(updateJobTimeout)
+	td.step()
+	saved, _ := loadServiceState(td.paths.State)
+	if !strings.Contains(saved.Update.Error, "did not end") || getWaitingUpdate(saved) != "v0.1.2" {
+		t.Errorf("a service that still runs after the job must show the version as waiting: %+v", saved.Update)
+	}
+	if log, _ := os.ReadFile(td.paths.Log); !strings.Contains(string(log), "all update-failed the automatic install of v0.1.2 did not end") {
+		t.Errorf("the log must tell about the failed install:\n%s", log)
+	}
+
+	startErr = errOffline
+	forceCheck()
+	receiveStarts(starts)
+	td.drainProbes()
+	if update := td.core.state.Update; !strings.Contains(update.Error, "did not start: offline") || getWaitingUpdate(td.core.state) != "v0.1.2" {
+		t.Errorf("a job that did not start must show the version as waiting: %+v", update)
+	}
+
+	startErr, isTurnedOff = nil, true
+	forceCheck()
+	if got := receiveStarts(starts); len(got) != 0 || td.core.state.Update.IsAuto || getWaitingUpdate(td.core.state) != "v0.1.2" {
+		t.Errorf("a setting that went off during the download must stop the install: starts %v, %+v", got, td.core.state.Update)
+	}
+
+	cleanErr = errOffline
+	before := checks
+	forceCheck()
+	if checks != before || td.core.state.Update.Error != "offline" {
+		t.Errorf("a job of the last update that still runs must stop the check: checks %d, %+v", checks-before, td.core.state.Update)
+	}
+}
+
+func TestCheckGitHubRedirect(t *testing.T) {
+	for address, isAllowed := range map[string]bool{
+		"https://github.com/keyCat/clawdiator/releases/download/v1.0.0/x":      true,
+		"https://release-assets.githubusercontent.com/x":                       true,
+		"http://release-assets.githubusercontent.com/x":                        false,
+		"https://example.com/x":                                                false,
+		"https://githubusercontent.com.example.com/x":                          false,
+		"https://github.com.example.com/keyCat/clawdiator/releases/download/x": false,
+	} {
+		request, _ := http.NewRequest(http.MethodGet, address, nil)
+		if err := checkGitHubRedirect(request, nil); (err == nil) != isAllowed {
+			t.Errorf("%s: allowed %v, error %v", address, isAllowed, err)
+		}
 	}
 }
 
