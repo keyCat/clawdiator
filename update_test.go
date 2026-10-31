@@ -11,7 +11,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -143,7 +142,7 @@ func TestDownloadRelease(t *testing.T) {
 	defer server.Close()
 
 	dir := t.TempDir()
-	binary, err := downloadRelease(context.Background(), server.URL, "v1.0.0", "arm64", dir, nil)
+	binary, err := downloadRelease(context.Background(), server.URL, "v1.0.0", "darwin-arm64", dir, nil)
 	if err != nil || binary != filepath.Join(dir, "clawdiator") {
 		t.Fatalf("the download = %q, %v", binary, err)
 	}
@@ -157,7 +156,7 @@ func TestDownloadRelease(t *testing.T) {
 	}
 	for _, tag := range []string{"v2.0.0", "v3.0.0", "v4.0.0", "v5.0.0", "v6.0.0", "v7.0.0", "v1.0.0/../../x", "v9.0.0"} {
 		dir := t.TempDir()
-		if _, err := downloadRelease(context.Background(), server.URL, tag, "arm64", dir, nil); err == nil {
+		if _, err := downloadRelease(context.Background(), server.URL, tag, "darwin-arm64", dir, nil); err == nil {
 			t.Errorf("%s must give an error", tag)
 		}
 		if entries, _ := os.ReadDir(dir); tag == "v2.0.0" && len(entries) != 0 {
@@ -175,7 +174,7 @@ func TestRealRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	binary, err := downloadRelease(context.Background(), releasesURL, tag, runtime.GOARCH, t.TempDir(), nil)
+	binary, err := downloadRelease(context.Background(), releasesURL, tag, getPlatform(), t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -91,7 +91,7 @@ const (
 	msgDryRunNewBlock
 	msgDryRunRemoveBlock
 	msgDryRunFlush
-	msgOnlyMacOS
+	msgSystemNotSupported
 	msgNeedRoot
 	msgFlagYes
 	msgFlagGeoServices
@@ -394,8 +394,8 @@ The local country database: ` + dbCredit + `, license CC BY 4.0.
 	msgDryRunNewBlock:    {"The tool would write this block at the end of the file:", "Программа записала бы этот блок в конец файла:"},
 	msgDryRunRemoveBlock: {"The tool would remove the clawdiator block from the file.", "Программа удалила бы блок clawdiator из файла."},
 	msgDryRunFlush:       {"Then the tool would flush the DNS cache with these commands:", "Затем программа очистила бы кэш DNS этими командами:"},
-	msgOnlyMacOS: {"this version works only on macOS. Linux and Windows come in a later version",
-		"эта версия работает только на macOS. Linux и Windows появятся в следующей версии"},
+	msgSystemNotSupported: {"this version works only on macOS and Linux. Windows comes in a later version",
+		"эта версия работает только на macOS и Linux. Windows появится в одной из следующих версий"},
 	msgNeedRoot: {`the %s command needs administrator rights. Run it with sudo`, `команде %s нужны права администратора. Запустите её через sudo`},
 	msgFlagYes:  {"agree to the consent text without a question", "согласиться с текстом согласия без вопроса"},
 	msgFlagGeoServices: {"the location services of the full check, separated by commas. The default is %s",

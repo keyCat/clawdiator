@@ -31,12 +31,12 @@ type appPaths struct {
 	// ControlDir holds the control socket for pause and resume. Only root can open the folder.
 	ControlDir    string
 	ControlSocket string
-	// ServiceFile is the definition of the service. Only macOS uses it now: a LaunchDaemon.
+	// ServiceFile is the definition of the service: a LaunchDaemon on macOS, a systemd system unit on Linux.
 	ServiceFile string
 	// TrayBinary is the binary with the tray. A root service must not link the Cocoa framework, so the tray has its own binary.
 	TrayBinary string
-	// AgentFile and TrayFile are the definitions of the notice agent and of the tray in the session of each user.
-	// Only macOS uses them now: LaunchAgents.
+	// AgentFile and TrayFile are the definitions of the notice agent and of the tray in the session of each user:
+	// LaunchAgents on macOS, global systemd user units on Linux.
 	AgentFile string
 	TrayFile  string
 	// Link is the link for the CLI in a folder of PATH.
@@ -82,8 +82,12 @@ func newAppPathsFor(goos, root string) appPaths {
 		paths.ConfigDir = filepath.Join(root, "/etc", appName)
 		paths.LogDir = filepath.Join(root, "/var/log", appName)
 		paths.Binary = filepath.Join(root, "/usr/local/lib", appName, appName)
+		paths.TrayBinary = filepath.Join(root, "/usr/local/lib", appName, trayBinaryName)
 		paths.SocketDir = filepath.Join(root, "/run", appName)
 		paths.ControlDir = filepath.Join(paths.SocketDir, "private")
+		paths.ServiceFile = filepath.Join(root, "/etc/systemd/system", systemdUnit)
+		paths.AgentFile = filepath.Join(root, "/etc/systemd/user", agentUnit)
+		paths.TrayFile = filepath.Join(root, "/etc/systemd/user", trayUnit)
 		paths.Link = filepath.Join(root, "/usr/local/bin", appName)
 		paths.Hosts = filepath.Join(root, "/etc/hosts")
 		paths.UsersDir = filepath.Join(root, "/home")

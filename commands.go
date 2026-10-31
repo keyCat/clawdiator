@@ -45,7 +45,7 @@ type installer struct {
 func newInstaller(paths appPaths) *installer {
 	return &installer{
 		paths:              paths,
-		manager:            launchdManager{},
+		manager:            newServiceManager(),
 		executable:         os.Executable,
 		isRoot:             func() bool { return os.Geteuid() == 0 },
 		flushDNS:           func() { _ = flushDNS() },
@@ -58,6 +58,19 @@ func newInstaller(paths appPaths) *installer {
 		stdin:              os.Stdin,
 		stdout:             os.Stdout,
 	}
+}
+
+// newServiceManager returns the service manager of this system: launchd on macOS, systemd on Linux.
+func newServiceManager() serviceManager {
+	if runtime.GOOS == "linux" {
+		return systemdManager{}
+	}
+	return launchdManager{}
+}
+
+// isSupportedSystem tells if install and update work on this system. Windows comes in a later version.
+func isSupportedSystem() bool {
+	return runtime.GOOS == "darwin" || runtime.GOOS == "linux"
 }
 
 // getUserName returns the user who started sudo, or the current user.
@@ -74,8 +87,8 @@ func getUserName() string {
 // commandInstall saves the settings and the consent, copies the binary and registers the service.
 // If an option is not set, the value from config.json stays.
 func (in *installer) commandInstall(args []string) error {
-	if runtime.GOOS != "darwin" {
-		return errorf(msgOnlyMacOS)
+	if !isSupportedSystem() {
+		return errorf(msgSystemNotSupported)
 	}
 	flags := newFlagSet("install")
 	isYes := flags.Bool("yes", false, text(msgFlagYes))

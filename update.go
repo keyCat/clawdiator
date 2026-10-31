@@ -102,14 +102,14 @@ func fetchLatestVersion(ctx context.Context, baseURL string) (string, error) {
 	return tag, nil
 }
 
-// downloadRelease downloads the archive of the tag for the architecture. It checks the archive with SHA256SUMS
+// downloadRelease downloads the archive of the tag for the platform, for example "darwin-arm64". It checks the archive with SHA256SUMS
 // of the same release, and it unpacks the 2 binaries into dir. It returns the path of the new main binary.
 // progress shows the download of the archive. It can be nil.
-func downloadRelease(ctx context.Context, baseURL, tag, arch, dir string, progress *downloadProgress) (string, error) {
+func downloadRelease(ctx context.Context, baseURL, tag, platform, dir string, progress *downloadProgress) (string, error) {
 	if !tagPattern.MatchString(tag) {
 		return "", fmt.Errorf("the tag %q is not correct", tag)
 	}
-	archiveName := appName + "-darwin-" + arch + ".tar.gz"
+	archiveName := appName + "-" + platform + ".tar.gz"
 	sums, err := downloadFile(ctx, baseURL+"/releases/download/"+tag+"/SHA256SUMS", 1<<20, nil)
 	if err != nil {
 		return "", err
@@ -286,7 +286,7 @@ func prepareUpdate(ctx context.Context, dir, tag string) (updateInfo, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return updateInfo{}, err
 	}
-	binary, err := downloadRelease(ctx, releasesURL, tag, runtime.GOARCH, dir, nil)
+	binary, err := downloadRelease(ctx, releasesURL, tag, getPlatform(), dir, nil)
 	if err != nil {
 		return updateInfo{}, err
 	}
@@ -297,9 +297,21 @@ func prepareUpdate(ctx context.Context, dir, tag string) (updateInfo, error) {
 	return info, err
 }
 
+// getPlatform returns the system and the architecture of this binary, the same as in the names of the release archives.
+func getPlatform() string {
+	return runtime.GOOS + "-" + runtime.GOARCH
+}
+
 // cleanUpdate removes the job and the folder of the last update. A job that still runs installs a version now,
 // for example the job that started this service. A stop of this job would leave a half install, so the function stops.
+// On Linux, the transient unit of the job removes itself after its end.
 func cleanUpdate(dir string) error {
+	if runtime.GOOS == "linux" {
+		if _, err := runCommand("systemctl", "is-active", "--quiet", updateUnit); err == nil {
+			return errors.New("the install of the last update still runs")
+		}
+		return os.RemoveAll(dir)
+	}
 	if output, err := runCommand("launchctl", "print", "system/"+updateLabel); err == nil && strings.Contains(output, "state = running") {
 		return errors.New("the install of the last update still runs")
 	}
@@ -307,8 +319,16 @@ func cleanUpdate(dir string) error {
 	return os.RemoveAll(dir)
 }
 
-// startUpdateJob starts "install --unattended" of the new binary as a one-shot LaunchDaemon. The output goes to update.log.
+// startUpdateJob starts "install --unattended" of the new binary as a one-shot job: a LaunchDaemon on macOS,
+// a transient systemd unit on Linux. The output goes to update.log.
 func startUpdateJob(paths appPaths, binary string) error {
+	if runtime.GOOS == "linux" {
+		// --collect removes the unit after its end, also after a failure. The next check can then start a new job.
+		_, err := runCommand("systemd-run", "--unit="+updateUnit, "--collect",
+			"--property=StandardOutput=append:"+paths.UpdateLog, "--property=StandardError=append:"+paths.UpdateLog,
+			binary, "install", "--unattended")
+		return err
+	}
 	plist := filepath.Join(filepath.Dir(binary), updateLabel+".plist")
 	if err := writeRootFile(plist, []byte(renderUpdatePlist(binary, paths.UpdateLog)), 0o644); err != nil {
 		return err
@@ -361,8 +381,8 @@ func (in *installer) commandUpdate(args []string) error {
 		}
 		return err
 	}
-	if runtime.GOOS != "darwin" {
-		return errorf(msgOnlyMacOS)
+	if !isSupportedSystem() {
+		return errorf(msgSystemNotSupported)
 	}
 	if !in.isRoot() {
 		return errorf(msgNeedRoot, "update")
@@ -409,7 +429,7 @@ func (in *installer) commandUpdate(args []string) error {
 	if stepLog != nil {
 		outputs = append(outputs, progressOutput{writer: stepLog, lang: languageEnglish})
 	}
-	binary, err := downloadRelease(downloadCtx, releasesURL, tag, runtime.GOARCH, dir, newDownloadProgress(in.now, outputs...))
+	binary, err := downloadRelease(downloadCtx, releasesURL, tag, getPlatform(), dir, newDownloadProgress(in.now, outputs...))
 	if err != nil {
 		return fail(msgUpdateDownloadFailed, err)
 	}

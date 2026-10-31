@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"time"
 )
@@ -21,6 +22,10 @@ func commandAgent(paths appPaths, args []string) error {
 		return err
 	}
 	if *isShow {
+		if runtime.GOOS == "linux" {
+			_, err := runCommand("systemctl", "--user", "start", trayUnit)
+			return err
+		}
 		_, err := runCommand("launchctl", "kickstart", "gui/"+strconv.Itoa(os.Getuid())+"/"+trayLabel)
 		return err
 	}

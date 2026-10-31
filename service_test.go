@@ -114,8 +114,11 @@ func newTestDriver(t *testing.T) *testDriver {
 	}
 	// The tests never change pf. A test of the firewall sets a fake pfctl.
 	td.firewall = nil
-	if err := os.MkdirAll(td.paths.Dir, 0o755); err != nil {
-		t.Fatal(err)
+	// The service creates these folders at its start. On Linux, the logs are not in the app folder.
+	for _, dir := range getAppFolders(td.paths) {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return td
 }

@@ -36,8 +36,10 @@ func TestRemoveUserFiles(t *testing.T) {
 	base := t.TempDir()
 	usersDir, outside := filepath.Join(base, "Users"), filepath.Join(base, "outside")
 	appDir := func(user string) string { return filepath.Join(usersDir, user, userAppDir) }
+	// parentDir is the folder of the folder of clawdiator: "Library/Application Support" on macOS, ".config" on Linux.
+	parentDir := func(user string) string { return filepath.Dir(appDir(user)) }
 
-	// alice has only the known files. Her folder must go, but "Application Support" must stay.
+	// alice has only the known files. Her folder must go, but its parent folder must stay.
 	writeTestFiles(t, filepath.Join(appDir("alice"), "agent.json"), filepath.Join(appDir("alice"), "agent.json.tmp"),
 		filepath.Join(appDir("alice"), "agent.log"), filepath.Join(appDir("alice"), "agent.log.1"))
 	// bob also has his own file. Only the known files must go.
@@ -49,12 +51,16 @@ func TestRemoveUserFiles(t *testing.T) {
 	// The home folder of dave is a link to another folder.
 	writeTestFiles(t, filepath.Join(outside, "dave", userAppDir, "agent.json"))
 	mustLink(t, filepath.Join(outside, "dave"), filepath.Join(usersDir, "dave"))
-	// The "Application Support" folder of erin is a link out of her home folder.
+	// The parent folder of the folder of clawdiator of erin is a link out of her home folder.
 	writeTestFiles(t, filepath.Join(outside, "erin", appName, "agent.json"))
-	mustLink(t, filepath.Join(outside, "erin"), filepath.Join(usersDir, "erin", "Library", "Application Support"))
+	mustLink(t, filepath.Join(outside, "erin"), parentDir("erin"))
 	// The folder of clawdiator of frank is a relative link to his own documents. os.Root follows such a link.
 	writeTestFiles(t, filepath.Join(usersDir, "frank", "Documents", "project", "agent.json"))
-	mustLink(t, filepath.Join("..", "..", "Documents", "project"), appDir("frank"))
+	frankTarget, err := filepath.Rel(parentDir("frank"), filepath.Join(usersDir, "frank", "Documents", "project"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustLink(t, frankTarget, appDir("frank"))
 
 	kept, err := removeUserFiles(usersDir)
 	if err != nil {
@@ -76,7 +82,7 @@ func TestRemoveUserFiles(t *testing.T) {
 		t.Errorf("the folder of alice must go: %v", err)
 	}
 	for _, path := range []string{
-		filepath.Join(usersDir, "alice", "Library", "Application Support"),
+		parentDir("alice"),
 		filepath.Join(appDir("bob"), "notes.txt"),
 		filepath.Join(usersDir, "carol", "Library", "Preferences", "settings.plist"),
 		filepath.Join(outside, "dave", userAppDir, "agent.json"),
