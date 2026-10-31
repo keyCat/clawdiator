@@ -3,10 +3,13 @@
 This file lists the changes of each version of clawdiator. The newest version is first.
 The text of each version is also on its release page on GitHub: https://github.com/keyCat/clawdiator/releases
 
-## Unreleased
+## v0.2.0 - 2026-10-31
 
+To install this version from v0.1.2, select "Install v0.2.0…" in the tray menu, or run `sudo clawdiator update`.
+The consent text did not change, so the installation does not ask for the consent again.
 The installed version runs the download of an update. So the update from v0.1.2 to this version still shows no progress.
 The progress, the log of the steps, the new limit of the download and the fix of the Terminal windows work from the next update.
+On Linux, do the steps of the section "Linux" of the README.
 
 ### Added
 
