@@ -29,6 +29,6 @@ cat <<'NOTES'
 - `clawdiator-darwin-amd64.tar.gz` is for a Mac with an Intel processor. It is not tested.
 - `clawdiator-linux-amd64.tar.gz` and `clawdiator-linux-arm64.tar.gz` are for Linux with systemd. Read the section "Linux" of the README.
 
-The binaries have no signature of Apple. Before the installation, read the steps in the [README](https://github.com/keyCat/clawdiator#install).
+The binaries of macOS have no signature of Apple. Before the installation, read the steps in the [README](https://github.com/keyCat/clawdiator#install).
 Compare the checksum of the archive with `SHA256SUMS`.
 NOTES

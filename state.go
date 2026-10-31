@@ -147,7 +147,7 @@ type serviceState struct {
 	LastFailure checkFailure `json:"last_failure"`
 	// LocalDB is the file of the local database that the service uses. The status command shows it.
 	LocalDB localDBState `json:"local_db,omitzero"`
-	// Firewall is the state of the firewall rules for the ranges of Anthropic. Only macOS has these rules now.
+	// Firewall is the state of the firewall rules for the ranges of Anthropic: pf on macOS, nftables on Linux.
 	Firewall firewallState `json:"firewall,omitzero"`
 	// Update is the result of the last check for a new version.
 	Update updateState `json:"update,omitzero"`

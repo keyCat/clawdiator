@@ -221,7 +221,7 @@ func TestWakeOnSameNetworkPreBlocks(t *testing.T) {
 	if checks := s.runUntil(testStart.Add(time.Minute)); len(checks) != 0 || s.c.state.IsPreBlocked {
 		t.Fatalf("normal ticks must not pre-block: %+v", checks)
 	}
-	// The Mac sleeps for 8 hours. Then the driver ticks again on the same network.
+	// The computer sleeps for 8 hours. Then the driver ticks again on the same network.
 	s.now = s.now.Add(8 * time.Hour)
 	checks := s.runUntil(s.now.Add(2 * time.Second))
 	if len(checks) != 1 || !s.c.state.IsPreBlocked || checks[0].Rounds != preBlockRounds {

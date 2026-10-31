@@ -18,17 +18,19 @@ A service runs in the background as root. It finds the country of the public IP 
   - Entries in the hosts file for the sites of Anthropic and OpenAI.
   - Firewall rules for the address ranges of Anthropic: pf on macOS, nftables on Linux.
 - The service blocks both providers at the start, at each change of the network and before each sleep. This pre-block stays until a full check passes.
-- A notice tells you about each block and each unblock. An icon in the menu bar shows the state.
+- A notice tells you about each block and each unblock. An icon in the menu bar of macOS or in the tray of Linux shows the state.
 
 ## Requirements
 
 - macOS 12 Monterey or later. The tests ran on macOS 26 and macOS 27. Read "Test status".
+  A Mac with Apple silicon uses the archive `darwin-arm64`. A Mac with an Intel processor uses the archive `darwin-amd64`.
+  To see the type of your Mac, run `uname -m`. The result `arm64` means Apple silicon. The result `x86_64` means Intel.
 - Or Linux with systemd, on amd64 or arm64. Read "Linux".
 - Administrator rights for the installation, the pause and the uninstallation.
-- A Mac with Apple silicon uses the archive `darwin-arm64`. A Mac with an Intel processor uses the archive `darwin-amd64`.
-  To see the type of your Mac, run `uname -m`. The result `arm64` means Apple silicon. The result `x86_64` means Intel.
 
 ## Install
+
+These steps are for macOS. On Linux, the steps are almost the same. Read "Linux".
 
 ### 1. Download the archive
 
@@ -77,7 +79,7 @@ sudo ./clawdiator install
 The tool shows the consent text. Read it. Then type `yes`.
 You can also run `./clawdiator` without a command. Then the configuration screen opens. Read "Menu".
 
-The `install` command does these steps:
+On macOS, the `install` command does these steps. On Linux, the folders and the service are different. Read "Linux".
 
 1. It copies the 2 binaries to `/Library/Application Support/clawdiator/bin`.
 2. It writes the settings to `/Library/Application Support/clawdiator/config.json`.
@@ -143,7 +145,7 @@ The menu runs `pause`, `resume` and `uninstall` with `sudo` in the same way. Aft
 
 Each cancel goes back to the menu. Esc in the menu closes it. After "Uninstall", the tool closes.
 Without an installation, `clawdiator` opens the configuration screen at once.
-The item "Settings…" of the tray menu opens the menu in Terminal.
+The item "Settings…" of the tray menu opens the menu in a terminal window.
 
 ## Use
 
@@ -160,18 +162,19 @@ The item "Settings…" of the tray menu opens the menu in Terminal.
 | `clawdiator help` | Shows the help. |
 
 The menu of the tray icon also has "Check now", "Pause", the setting of the notices after a wake, "Settings…" and "Log".
-"Log" opens the log or the verbose log in the Console app. The last line of the menu shows the version.
+"Log" opens the log or the verbose log: on macOS in the Console app, on Linux with `xdg-open`. The last line of the menu shows the version.
 "Hide the icon" removes the icon until the next login. The notices continue. `clawdiator agent --show` shows the icon again.
 
-The text of the tool is in English or in Russian, the same as the language of macOS. To select a language, set `CLAWDIATOR_LANG` to `en` or `ru`.
+The text of the tool is in English or in Russian, the same as the language of the system. To select a language, set `CLAWDIATOR_LANG` to `en` or `ru`.
 The log is always in English.
 
 ### Logs
 
-The service writes 2 logs in `/Library/Application Support/clawdiator`:
+The service writes its logs in `/Library/Application Support/clawdiator` on macOS, and in `/var/log/clawdiator` on Linux:
 
 - `clawdiator.log` has 1 line for each block, unblock, pre-block, pause and error.
 - `clawdiator-debug.log` has the details of each step, with the time in milliseconds. `clawdiator status --verbose` shows its end.
+- `update.log` has the steps of the updates.
 
 CAUTION: The verbose log contains the public IP address of the computer. Do not publish a copy of the log.
 
@@ -189,7 +192,7 @@ When a new version is available, you see these signs:
 - The items "Install vX…" and "Open the website…" in the tray menu. The website is https://ilya.zone/clawdiator/.
 - A line in `clawdiator status`.
 
-To install the new version, select "Install vX…" in the tray menu. A Terminal window opens and runs this command:
+To install the new version, select "Install vX…" in the tray menu. A terminal window opens and runs this command:
 
 ```sh
 sudo clawdiator update
@@ -199,7 +202,7 @@ Type your password. The command downloads the version from GitHub and checks it 
 If the consent text changed, the command shows the new text. Type `yes` to agree. After the update, a notice shows the new version.
 
 The command shows each step. During the download, a line shows the size, the speed and the time to the end.
-The command also writes the steps with the time to `/Library/Application Support/clawdiator/update.log`.
+The command also writes the steps with the time to `update.log`. Read "Logs".
 A slow download continues. If GitHub sends no data for 60 seconds, the download stops with an error. Then run the command again.
 
 The checksum finds a damaged download. It does not find a changed release, because `SHA256SUMS` comes from the same GitHub release.
@@ -209,8 +212,8 @@ A notice or the command then shows the result.
 
 ### Automatic updates
 
-CAUTION: If an automatic install fails after it stops the old service, the Mac has no service and no block.
-Then run `sudo clawdiator update`. The error is in `/Library/Application Support/clawdiator/update.log`.
+CAUTION: If an automatic install fails after it stops the old service, the computer has no service and no block.
+Then run `sudo clawdiator update`. The error is in `update.log`.
 
 The automatic updates are off by default. To turn them on, select "Install updates automatically" in the tray menu. Then type your password.
 You can also use this command. Use `off` to turn them off again.
@@ -221,7 +224,7 @@ sudo clawdiator update --auto-install on
 
 With the automatic updates on, the service downloads and checks each new version. Then it installs the version without a question.
 It never installs a version with a new consent text automatically. Such a version waits for you, the same as with the automatic updates off.
-The output of the last automatic update is in `/Library/Application Support/clawdiator/update.log`.
+The output of the automatic updates is in `update.log`.
 
 A local build with the version `dev` does not check for updates.
 
@@ -275,8 +278,9 @@ The tool is a safety net. It does not guarantee that the use follows the policie
 
 ## Build from the source
 
-You need Go 1.26 and the Xcode command line tools. The tray binary uses cgo.
-Use Go 1.26, because a binary from Go 1.27 does not start on macOS 12.
+You need Go 1.26. Use Go 1.26, because a binary from Go 1.27 does not start on macOS 12.
+On macOS, you also need the Xcode command line tools, because the tray binary of macOS uses cgo.
+The binaries of Linux need no cgo. To build the tray of Linux, use `CGO_ENABLED=0` in the second command.
 
 ```sh
 CGO_ENABLED=0 go build -o dist/clawdiator .
