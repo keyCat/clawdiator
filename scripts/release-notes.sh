@@ -20,13 +20,14 @@ if [ -z "$(printf '%s' "$notes" | tr -d '[:space:]')" ]; then
 	exit 1
 fi
 printf '%s\n' "$notes"
-# Each release has the same 2 archives, so each release text tells which archive fits which Mac.
+# Each release has the same 4 archives, so each release text tells which archive fits which computer.
 cat <<'NOTES'
 
 ### Downloads
 
 - `clawdiator-darwin-arm64.tar.gz` is for a Mac with Apple silicon.
 - `clawdiator-darwin-amd64.tar.gz` is for a Mac with an Intel processor. It is not tested.
+- `clawdiator-linux-amd64.tar.gz` and `clawdiator-linux-arm64.tar.gz` are for Linux with systemd. Read the section "Linux" of the README.
 
 The binaries have no signature of Apple. Before the installation, read the steps in the [README](https://github.com/keyCat/clawdiator#install).
 Compare the checksum of the archive with `SHA256SUMS`.

@@ -4,7 +4,8 @@
 Each provider has a list of supported countries. A use from another country can get an account blocked.
 The tool is for teams that agree to this block. It asks for the consent of the user before the installation.
 
-The tool works on macOS now. Linux and Windows come in a later version.
+The tool works on macOS and on Linux with systemd. Windows comes in a later version.
+The Linux version is new. Nobody tested it on a real computer yet. Read the section "Linux".
 
 ## How the tool works
 
@@ -15,13 +16,14 @@ A service runs in the background as root. It finds the country of the public IP 
 - The service allows a provider only if each reply gives an allowed country. If the check fails, the service blocks.
 - The block has 2 parts:
   - Entries in the hosts file for the sites of Anthropic and OpenAI.
-  - Firewall rules of pf for the address ranges of Anthropic.
+  - Firewall rules of pf for the address ranges of Anthropic. Only macOS has these rules now.
 - The service blocks both providers at the start, at each change of the network and before each sleep. This pre-block stays until a full check passes.
 - A notice tells you about each block and each unblock. An icon in the menu bar shows the state.
 
 ## Requirements
 
 - macOS 12 Monterey or later. The tests ran on macOS 26 and macOS 27. Read "Test status".
+- Or Linux with systemd, on amd64 or arm64. Read "Linux".
 - Administrator rights for the installation, the pause and the uninstallation.
 - A Mac with Apple silicon uses the archive `darwin-arm64`. A Mac with an Intel processor uses the archive `darwin-amd64`.
   To see the type of your Mac, run `uname -m`. The result `arm64` means Apple silicon. The result `x86_64` means Intel.
@@ -93,6 +95,33 @@ To change a setting, run `install` again with the option. The other settings sta
 | `--geo-min-replies` | `2` | The minimum number of correct replies of the location services. |
 | `--auto-update` | `off` | `on` lets the service install each new version automatically. Read "Updates". |
 | `--yes` | off | Agree to the consent text without the question. |
+
+## Linux
+
+The steps of "Install" are the same on Linux, with 2 differences. Use the archive `linux-amd64` or `linux-arm64`.
+To see the architecture, run `uname -m`. The result `x86_64` means amd64. The result `aarch64` means arm64.
+Linux has no Gatekeeper, so step 4 is not necessary.
+
+```sh
+curl -LO https://github.com/keyCat/clawdiator/releases/latest/download/clawdiator-linux-amd64.tar.gz
+curl -LO https://github.com/keyCat/clawdiator/releases/latest/download/SHA256SUMS
+grep clawdiator-linux-amd64.tar.gz SHA256SUMS | sha256sum -c
+mkdir clawdiator
+tar -xzf clawdiator-linux-amd64.tar.gz -C clawdiator
+cd clawdiator
+sudo ./clawdiator install
+```
+
+| Part | On Linux |
+|---|---|
+| Service | The systemd unit `clawdiator.service`. systemd starts it again after a stop. |
+| Block | Only the entries in `/etc/hosts`. The firewall rules for Anthropic come in a later version. |
+| Notices and tray icon | Global user units of systemd. They start with `graphical-session.target`, for example in GNOME and KDE Plasma. A desktop without this target, for example XFCE, gets no notices and no tray icon. The service still blocks. |
+| Tray icon in GNOME | GNOME shows the icon only with the AppIndicator extension. |
+| Password window | "Pause" in the tray asks for the password through polkit. |
+| Terminal | "Install vX…" and "Settings…" open the first available program: `x-terminal-emulator`, `gnome-terminal`, `konsole`, `xfce4-terminal` or `xterm`. |
+| Sleep | The pre-block before a sleep uses a delay lock of logind. |
+| Files | The binaries are in `/usr/local/lib/clawdiator`, and `config.json` is in `/etc/clawdiator`. The state, the local database and the downloads of updates are in `/var/lib/clawdiator`. The logs are in `/var/log/clawdiator`. The files of each user are in `~/.config/clawdiator`. |
 
 ## Menu
 
@@ -210,8 +239,9 @@ If a block stays and the service is gone, remove the block with this command:
 sudo clawdiator hosts --remove
 ```
 
-If the tool does not work at all, remove the firewall rules with this command.
+If the tool does not work at all on macOS, remove the firewall rules with this command.
 Then edit `/private/etc/hosts` as root. Remove the line that starts with `# BEGIN clawdiator`, the line `# END clawdiator` and all lines between them.
+On Linux, edit `/etc/hosts` as root in the same way. Linux has no firewall rules of clawdiator yet.
 
 ```sh
 sudo pfctl -a com.apple/clawdiator -F rules
@@ -272,4 +302,5 @@ MIT. Read [LICENSE](LICENSE). Each archive also contains `THIRD_PARTY_LICENSES.t
   They also covered the firewall rules, sleep and wake, and the uninstallation.
 - macOS on a Mac with an Intel processor: not tested.
 - macOS 12 to macOS 25: not tested. Go 1.26 supports macOS 12.
-- Linux and Windows: not ready.
+- Linux: the unit tests pass on Linux. A test on a real computer is not done yet.
+- Windows: not ready.

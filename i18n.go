@@ -329,7 +329,7 @@ const (
 var messages = [messageCount][2]string{
 	msgUsage: {
 		`clawdiator blocks the access to Anthropic and OpenAI when this computer is in an unsupported country.
-The work on the tool is not complete. Now the tool works only on macOS.
+The work on the tool is not complete. Now the tool works on macOS and Linux.
 
 Usage:
   clawdiator <command> [options]
@@ -352,7 +352,7 @@ Commands:
 The local country database: ` + dbCredit + `, license CC BY 4.0.
 `,
 		`clawdiator блокирует доступ к Anthropic и OpenAI, когда компьютер находится в неподдерживаемой стране.
-Работа над программой не завершена. Сейчас программа работает только на macOS.
+Работа над программой не завершена. Сейчас программа работает на macOS и Linux.
 
 Использование:
   clawdiator <команда> [параметры]

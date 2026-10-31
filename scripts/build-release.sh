@@ -1,7 +1,7 @@
 #!/bin/sh
-# build-release.sh builds the release archives of clawdiator for macOS and checks them.
+# build-release.sh builds the release archives of clawdiator for macOS and Linux, and it checks them.
 # Usage: scripts/build-release.sh v0.1.0
-# The result is in dist/release: 1 archive for each architecture, and SHA256SUMS.
+# The result is in dist/release: 1 archive for each system and architecture, and SHA256SUMS.
 # The script fails if 1 check fails. The GitHub workflow "Release" runs the same script.
 set -eu
 # The C locale gives the same order of sort on each computer.
@@ -60,6 +60,19 @@ write_licenses() {
 	done
 }
 
+# pack writes the archive of a stage folder with the 2 binaries, and it checks the files in the archive.
+pack() {
+	stage="$1"
+	cp README.md LICENSE "$stage/"
+	write_licenses "$stage/THIRD_PARTY_LICENSES.txt" "$stage/clawdiator" "$stage/clawdiator-tray"
+	archive="$stage.tar.gz"
+	# Without these 2 settings, bsdtar adds files with the extended attributes of macOS, for example ._clawdiator.
+	(cd "$stage" && COPYFILE_DISABLE=1 tar --no-mac-metadata -czf "$archive" clawdiator clawdiator-tray README.md LICENSE THIRD_PARTY_LICENSES.txt)
+	listed=$(tar -tzf "$archive" | sort | tr '\n' ' ')
+	[ "$listed" = "LICENSE README.md THIRD_PARTY_LICENSES.txt clawdiator clawdiator-tray " ] || fail "$(basename "$archive") contains: $listed"
+	rm -rf "$stage"
+}
+
 for arch in arm64 amd64; do
 	stage="$out/clawdiator-darwin-$arch"
 	mkdir -p "$stage"
@@ -87,16 +100,29 @@ for arch in arm64 amd64; do
 		[ "$("$stage/clawdiator" version)" = "clawdiator $version" ] || fail "the main binary of $arch shows the version $("$stage/clawdiator" version)"
 	fi
 
-	cp README.md LICENSE "$stage/"
-	write_licenses "$stage/THIRD_PARTY_LICENSES.txt" "$stage/clawdiator" "$stage/clawdiator-tray"
-	archive="$out/clawdiator-darwin-$arch.tar.gz"
-	# Without these 2 settings, bsdtar adds files with the extended attributes of macOS, for example ._clawdiator.
-	(cd "$stage" && COPYFILE_DISABLE=1 tar --no-mac-metadata -czf "$archive" clawdiator clawdiator-tray README.md LICENSE THIRD_PARTY_LICENSES.txt)
-	listed=$(tar -tzf "$archive" | sort | tr '\n' ' ')
-	[ "$listed" = "LICENSE README.md THIRD_PARTY_LICENSES.txt clawdiator clawdiator-tray " ] || fail "the archive of $arch contains: $listed"
-	rm -rf "$stage"
+	pack "$stage"
 done
 
-(cd "$out" && shasum -a 256 clawdiator-darwin-*.tar.gz >SHA256SUMS)
+# The tray of fyne.io/systray uses D-Bus on Linux, so no binary of Linux needs cgo. Then the Mac builds them too.
+# A static binary does not depend on the C library of the distribution.
+for arch in amd64 arm64; do
+	stage="$out/clawdiator-linux-$arch"
+	mkdir -p "$stage"
+	ldflags="-s -w -X main.version=$version"
+	CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -ldflags "$ldflags" -o "$stage/clawdiator" .
+	CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -tags tray -ldflags "$ldflags" -o "$stage/clawdiator-tray" .
+	machine=x86-64
+	[ "$arch" = arm64 ] && machine=aarch64
+	for binary in clawdiator clawdiator-tray; do
+		description=$(file -b "$stage/$binary")
+		case "$description" in
+		"ELF 64-bit LSB executable, "*"$machine"*"statically linked"*) ;;
+		*) fail "$binary of linux-$arch is not a static binary for $machine: $description" ;;
+		esac
+	done
+	pack "$stage"
+done
+
+(cd "$out" && shasum -a 256 clawdiator-*.tar.gz >SHA256SUMS)
 echo "The release $version is in $out:"
 ls -l "$out"

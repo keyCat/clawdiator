@@ -43,6 +43,8 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             dist/release/clawdiator-darwin-arm64.tar.gz \
             dist/release/clawdiator-darwin-amd64.tar.gz \
+            dist/release/clawdiator-linux-amd64.tar.gz \
+            dist/release/clawdiator-linux-arm64.tar.gz \
             dist/release/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" \

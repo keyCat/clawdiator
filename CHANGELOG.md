@@ -10,6 +10,10 @@ The progress, the log of the steps, the new limit of the download and the fix of
 
 ### Added
 
+- Linux with systemd, on amd64 and arm64. It has the service, the notices over D-Bus, the tray icon, the menu and the updates.
+  The block on Linux uses only the hosts file. The firewall rules for Anthropic come in a later version.
+  The Linux version is not tested on a real computer yet. Read the section "Linux" of the README.
+
 - `sudo clawdiator update` shows each step. During the download, a line shows the size, the speed and the time to the end.
 - `sudo clawdiator update` writes its steps with the time to `update.log`, the same file as the automatic update.
 - `install` tells about the start of the service, because the start can wait some seconds for the end of the old service.
