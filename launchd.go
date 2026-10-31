@@ -38,12 +38,12 @@ type serviceManager interface {
 type launchdManager struct{}
 
 func (launchdManager) Install(paths appPaths) error {
-	if err := writeRootFile(paths.Plist, []byte(renderLaunchdPlist(paths)), 0o644); err != nil {
+	if err := writeRootFile(paths.ServiceFile, []byte(renderLaunchdPlist(paths)), 0o644); err != nil {
 		return err
 	}
 	// Stop the old service first. The service does not always exist, so ignore the error.
 	_, _ = runCommand("launchctl", "bootout", "system/"+launchdLabel)
-	return bootstrapLaunchd("system", paths.Plist)
+	return bootstrapLaunchd("system", paths.ServiceFile)
 }
 
 // bootstrapLaunchd loads the definition into the domain. launchctl removes an old job asynchronously,
@@ -60,16 +60,16 @@ func bootstrapLaunchd(domain, plist string) error {
 }
 
 func (launchdManager) InstallAgents(paths appPaths, hasTray bool, userID int) error {
-	if err := writeRootFile(paths.AgentPlist, []byte(renderAgentPlist(agentLabel, []string{paths.Binary, "agent"}, true)), 0o644); err != nil {
+	if err := writeRootFile(paths.AgentFile, []byte(renderAgentPlist(agentLabel, []string{paths.Binary, "agent"}, true)), 0o644); err != nil {
 		return err
 	}
-	jobs := map[string]string{agentLabel: paths.AgentPlist}
+	jobs := map[string]string{agentLabel: paths.AgentFile}
 	if hasTray {
-		if err := writeRootFile(paths.TrayPlist, []byte(renderAgentPlist(trayLabel, []string{paths.TrayBinary, "tray"}, false)), 0o644); err != nil {
+		if err := writeRootFile(paths.TrayFile, []byte(renderAgentPlist(trayLabel, []string{paths.TrayBinary, "tray"}, false)), 0o644); err != nil {
 			return err
 		}
-		jobs[trayLabel] = paths.TrayPlist
-	} else if err := os.Remove(paths.TrayPlist); err != nil && !os.IsNotExist(err) {
+		jobs[trayLabel] = paths.TrayFile
+	} else if err := os.Remove(paths.TrayFile); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	if userID <= 0 {
@@ -93,7 +93,7 @@ func (launchdManager) UninstallAgents(paths appPaths, userID int) error {
 		}
 	}
 	var errs []error
-	for _, plist := range []string{paths.TrayPlist, paths.AgentPlist} {
+	for _, plist := range []string{paths.TrayFile, paths.AgentFile} {
 		if err := os.Remove(plist); err != nil && !os.IsNotExist(err) {
 			errs = append(errs, err)
 		}
@@ -144,7 +144,7 @@ func renderAgentPlist(label string, args []string, isAlwaysAlive bool) string {
 func (launchdManager) Uninstall(paths appPaths) error {
 	_, _ = runCommand("launchctl", "bootout", "system/"+launchdLabel)
 	_, _ = runCommand("launchctl", "bootout", "system/"+updateLabel)
-	if err := os.Remove(paths.Plist); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(paths.ServiceFile); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil

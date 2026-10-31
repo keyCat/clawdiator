@@ -835,8 +835,10 @@ func commandService(paths appPaths) error {
 // The service does not stop for a bad config or a damaged state, because each start blocks until a full check passes.
 // A crash loop would then block all the time.
 func runService(ctx context.Context, paths appPaths) error {
-	if err := makeFolder(paths.Dir, 0o755); err != nil {
-		return err
+	for _, dir := range getAppFolders(paths) {
+		if err := makeFolder(dir, 0o755); err != nil {
+			return err
+		}
 	}
 	release, err := lockService(paths.Lock)
 	if err != nil {

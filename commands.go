@@ -134,8 +134,10 @@ func (in *installer) commandInstall(args []string) error {
 		cfg.Consent = consent{Time: in.now(), Version: consentVersion, User: in.user}
 	}
 
-	if err := makeRootFolder(in.paths.Dir); err != nil {
-		return err
+	for _, dir := range getAppFolders(in.paths) {
+		if err := makeRootFolder(dir); err != nil {
+			return err
+		}
 	}
 	if err := in.installBinary(); err != nil {
 		return errorf(msgCannotCopyBinary, err)
@@ -259,10 +261,10 @@ func (in *installer) commandUninstall() error {
 		}
 		fmt.Fprintln(in.stdout, text(msgStepDone, text(step)))
 	}
-	if in.paths.AgentPlist != "" {
+	if in.paths.AgentFile != "" {
 		report(msgStepStopAgents, in.manager.UninstallAgents(in.paths, in.consoleUserID()))
 	}
-	if in.paths.Plist != "" {
+	if in.paths.ServiceFile != "" {
 		report(msgStepStopService, in.stopService())
 	}
 	// The token of the firewall is in state.json, so this step comes before the removal of the app folder.
@@ -278,7 +280,11 @@ func (in *installer) commandUninstall() error {
 		report(msgStepRemoveLink, removeLink(in.paths.Link, in.paths.Binary))
 	}
 	report(msgStepRemoveSockets, os.RemoveAll(in.paths.SocketDir))
-	report(msgStepRemoveFolder, os.RemoveAll(in.paths.Dir))
+	var folderErrs []error
+	for _, dir := range getAppFolders(in.paths) {
+		folderErrs = append(folderErrs, os.RemoveAll(dir))
+	}
+	report(msgStepRemoveFolder, errors.Join(folderErrs...))
 	if in.paths.UsersDir != "" {
 		kept, err := removeUserFiles(in.paths.UsersDir)
 		report(msgStepRemoveUserFiles, err)
@@ -382,11 +388,11 @@ func commandStatus(paths appPaths, args []string, now time.Time, stdout io.Write
 	if err != nil {
 		return errorf(msgCannotReadState, paths.State, err)
 	}
-	if paths.Plist != "" {
-		if _, err := os.Stat(paths.Plist); err != nil {
+	if paths.ServiceFile != "" {
+		if _, err := os.Stat(paths.ServiceFile); err != nil {
 			fmt.Fprintln(stdout, text(msgStatusNotInstalled))
 		} else {
-			fmt.Fprintln(stdout, text(msgStatusInstalled, paths.Plist))
+			fmt.Fprintln(stdout, text(msgStatusInstalled, paths.ServiceFile))
 		}
 	}
 	switch age := now.Sub(state.Heartbeat).Round(time.Second); {
@@ -573,6 +579,17 @@ func readYes(input io.Reader) bool {
 }
 
 // makeRootFolder creates the folder with the rights 0755 and gives it to root, also when the folder exists.
+// getAppFolders returns the app folder, and on Linux also the folders of the config and of the logs. Each folder comes 1 time.
+func getAppFolders(paths appPaths) []string {
+	folders := []string{paths.Dir}
+	for _, dir := range []string{paths.ConfigDir, paths.LogDir} {
+		if !slices.Contains(folders, dir) {
+			folders = append(folders, dir)
+		}
+	}
+	return folders
+}
+
 func makeRootFolder(path string) error {
 	if err := makeFolder(path, 0o755); err != nil {
 		return err

@@ -310,7 +310,7 @@ func cleanUpdate(dir string) error {
 // startUpdateJob starts "install --unattended" of the new binary as a one-shot LaunchDaemon. The output goes to update.log.
 func startUpdateJob(paths appPaths, binary string) error {
 	plist := filepath.Join(filepath.Dir(binary), updateLabel+".plist")
-	if err := writeRootFile(plist, []byte(renderUpdatePlist(binary, filepath.Join(paths.Dir, "update.log"))), 0o644); err != nil {
+	if err := writeRootFile(plist, []byte(renderUpdatePlist(binary, paths.UpdateLog)), 0o644); err != nil {
 		return err
 	}
 	_, _ = runCommand("launchctl", "bootout", "system/"+updateLabel)
@@ -368,7 +368,7 @@ func (in *installer) commandUpdate(args []string) error {
 		return errorf(msgNeedRoot, "update")
 	}
 	// The steps go to the terminal, and in English with the time to update.log.
-	logPath := filepath.Join(in.paths.Dir, "update.log")
+	logPath := in.paths.UpdateLog
 	stepLog := openUpdateLog(logPath, in.now)
 	defer stepLog.Close()
 	say := func(key messageKey, args ...any) {

@@ -468,7 +468,7 @@ Read what the service does:
 	msgStepRemoveBlock:     {"remove the block from the hosts file", "удалить блокировку из файла hosts"},
 	msgStepRemoveLink:      {"remove the link of the command", "удалить ссылку команды"},
 	msgStepRemoveSockets:   {"remove the sockets", "удалить сокеты"},
-	msgStepRemoveFolder:    {"remove the app folder", "удалить папку приложения"},
+	msgStepRemoveFolder:    {"remove the app folder, the config and the logs", "удалить папку приложения, настройки и журналы"},
 	msgStepRemoveFirewall:  {"remove the firewall rules and release the switch-on of pf", "удалить правила брандмауэра и освободить включение pf"},
 	msgFirewallRemoved:     {"The firewall rules of the pf anchor %s are removed.", "Правила брандмауэра в якоре pf %s удалены."},
 	msgStatusFirewallOn:    {"Firewall: the address ranges of Anthropic are blocked.", "Брандмауэр: диапазоны адресов Anthropic заблокированы."},

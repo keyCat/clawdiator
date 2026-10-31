@@ -60,8 +60,8 @@ func TestLaunchdInstallAgentsWritesPlists(t *testing.T) {
 	if err := (launchdManager{}).InstallAgents(paths, true, 0); err != nil {
 		t.Fatal(err)
 	}
-	agent, _ := os.ReadFile(paths.AgentPlist)
-	tray, _ := os.ReadFile(paths.TrayPlist)
+	agent, _ := os.ReadFile(paths.AgentFile)
+	tray, _ := os.ReadFile(paths.TrayFile)
 	if !strings.Contains(string(agent), "<key>KeepAlive</key>\n\t<true/>") || !strings.Contains(string(agent), paths.Binary) {
 		t.Errorf("the notice agent plist = %s", agent)
 	}
@@ -71,13 +71,13 @@ func TestLaunchdInstallAgentsWritesPlists(t *testing.T) {
 	if err := (launchdManager{}).InstallAgents(paths, false, 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(paths.TrayPlist); !os.IsNotExist(err) {
+	if _, err := os.Stat(paths.TrayFile); !os.IsNotExist(err) {
 		t.Errorf("without the tray binary, the tray plist must go: %v", err)
 	}
 	if err := (launchdManager{}).UninstallAgents(paths, 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(paths.AgentPlist); !os.IsNotExist(err) {
+	if _, err := os.Stat(paths.AgentFile); !os.IsNotExist(err) {
 		t.Errorf("the uninstall must remove the agent plist: %v", err)
 	}
 }

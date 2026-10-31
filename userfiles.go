@@ -4,10 +4,19 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // userAppDir is the folder of clawdiator in the home folder of a user on macOS. getUserAppDir gives the same folder.
-var userAppDir = filepath.Join("Library", "Application Support", appName)
+var userAppDir = getUserAppDirName(runtime.GOOS)
+
+// getUserAppDirName returns the folder of clawdiator in a home folder. The agent finds the same folder with getUserAppDir.
+func getUserAppDirName(goos string) string {
+	if goos == "linux" {
+		return filepath.Join(".config", appName)
+	}
+	return filepath.Join("Library", "Application Support", appName)
+}
 
 // userFileNames are all files that the notice agent and the tray write in the folder of a user.
 var userFileNames = []string{"agent.json", "agent.json.tmp", "agent.log", "agent.log.1"}
