@@ -44,6 +44,21 @@ func requestSleepBlock(requests chan<- sleepRequest) bool {
 	}
 }
 
+// handlePrepareForSleep handles the signal PrepareForSleep of logind on Linux. logind delays the sleep while the service
+// holds a delay lock. So before a sleep, the loop applies the pre-block, and then release gives the lock back.
+// After the wake, take gets a new lock for the next sleep.
+func handlePrepareForSleep(isSleep bool, requests chan<- sleepRequest, wakes chan<- struct{}, release, take func()) {
+	if !isSleep {
+		signalWithoutWait(wakes)
+		take()
+		return
+	}
+	defer release()
+	if !requestSleepBlock(requests) {
+		sleepBlockTimeouts.Add(1)
+	}
+}
+
 // handlePowerMessage handles 1 message of IOKit about the power of the system. allow answers a message that needs an answer.
 // Before a sleep, it asks the loop for the block. The system waits for the answer up to 30 seconds,
 // so the answer comes on each path: after the block, after the timeout, and after a panic.

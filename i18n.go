@@ -322,6 +322,7 @@ const (
 	msgDurationMinutes
 	msgDurationHours
 	msgInstallStartService
+	msgPressEnterToClose
 	messageCount
 )
 
@@ -617,8 +618,8 @@ Read what the service does:
 		"Автоматические обновления: выключены. Чтобы включить их, выполните \"sudo clawdiator update --auto-install on\"."},
 	msgUpdateRunning: {"The service installs a new version now. A notice comes after the update.",
 		"Служба устанавливает новую версию сейчас. После обновления придёт уведомление."},
-	msgTerminalNotOpened: {"The tray did not open Terminal: %v. Run \"sudo clawdiator update\" in Terminal.",
-		"Значок не открыл Терминал: %v. Выполните \"sudo clawdiator update\" в Терминале."},
+	msgTerminalNotOpened: {"The tray did not open a terminal: %v. Run this command in a terminal: %s",
+		"Значок не открыл терминал: %v. Выполните эту команду в терминале: %s"},
 	msgNoChanges:               {"No changes.", "Без изменений."},
 	msgNoticesSaved:            {"The notice settings are saved.", "Настройки уведомлений сохранены."},
 	msgMenuConfigure:           {"Configuration", "Настройки"},
@@ -701,4 +702,5 @@ Read what the service does:
 	msgDurationMinutes:       {"%d min %d s", "%d мин %d с"},
 	msgDurationHours:         {"%d h %d min", "%d ч %d мин"},
 	msgInstallStartService:   {"The tool starts the service.", "Программа запускает службу."},
+	msgPressEnterToClose:     {"Push Enter to close the window.", "Нажмите Enter, чтобы закрыть окно."},
 }

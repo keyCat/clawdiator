@@ -118,7 +118,7 @@ func TestSleepRequestWithoutAnswer(t *testing.T) {
 // The registration only asks IOKit for the messages about sleep. It changes nothing on the computer.
 func TestWatchSleepRegisters(t *testing.T) {
 	if runtime.GOOS != "darwin" {
-		t.Skip("only macOS has the messages about sleep now")
+		t.Skip("the registration needs IOKit of macOS. On Linux it needs logind, and the test container has no logind")
 	}
 	sleeps, wakes, err := watchSleep()
 	if err != nil || sleeps == nil || wakes == nil {
@@ -201,5 +201,43 @@ func TestAgentAfterWakeWithOldState(t *testing.T) {
 	later.Heartbeat = wake.Add(time.Minute)
 	if got := model.update(wake.Add(time.Minute), &later, false); len(got) != 1 {
 		t.Errorf("a long pre-block after the wake must still give 1 notice: %v", got)
+	}
+}
+
+// TestHandlePrepareForSleep checks the delay lock of logind: before a sleep, the lock goes only after the block,
+// also after the timeout. After a wake, a new lock comes for the next sleep.
+func TestHandlePrepareForSleep(t *testing.T) {
+	requests, wakes := make(chan sleepRequest), make(chan struct{}, 1)
+	var events []string
+	release := func() { events = append(events, "release") }
+	take := func() { events = append(events, "take") }
+	go func() {
+		request := <-requests
+		events = append(events, "block")
+		close(request.Done)
+	}()
+	handlePrepareForSleep(true, requests, wakes, release, take)
+	if !slices.Equal(events, []string{"block", "release"}) {
+		t.Errorf("before a sleep, the lock must go after the block: %v", events)
+	}
+
+	// Nobody applies the block. The lock goes after the timeout, so the sleep does not wait forever.
+	events = nil
+	before := sleepBlockTimeouts.Load()
+	start := time.Now()
+	handlePrepareForSleep(true, requests, wakes, release, take)
+	if !slices.Equal(events, []string{"release"}) || sleepBlockTimeouts.Load() != before+1 || time.Since(start) < sleepBlockTimeout {
+		t.Errorf("without the block, the lock must go after %v: %v", sleepBlockTimeout, events)
+	}
+
+	events = nil
+	handlePrepareForSleep(false, requests, wakes, release, take)
+	select {
+	case <-wakes:
+	default:
+		t.Error("the wake must send a value to the loop")
+	}
+	if !slices.Equal(events, []string{"take"}) {
+		t.Errorf("after a wake, a new lock must come: %v", events)
 	}
 }

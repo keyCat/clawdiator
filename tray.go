@@ -78,14 +78,18 @@ func startTray(paths appPaths) {
 	go onClick(longItem, func() { setNotices(preBlockNoticesLong) })
 	go onClick(allItem, func() { setNotices(preBlockNoticesAll) })
 	// The menu runs in Terminal as the user. It asks for the password only for the actions that need it.
-	go onClick(settingsItem, func() { _ = openTerminal(quoteShell(paths.Binary)) })
+	go onClick(settingsItem, func() {
+		if err := openTerminal(quoteShell(paths.Binary)); err != nil {
+			_ = showNotice(text(msgTerminalNotOpened, err, appName))
+		}
+	})
 	go onClick(showLogItem, func() { _ = openLogFile(paths.Log) })
 	go onClick(showVerboseLogItem, func() { _ = openLogFile(paths.DebugLog) })
 	// The update needs the password and can show a new consent text, so it runs in Terminal.
 	go onClick(updateItem, func() {
 		// macOS can refuse the control of Terminal. Then the notice gives the command.
 		if err := openTerminal("sudo " + quoteShell(paths.Binary) + " update"); err != nil {
-			_ = showNotice(text(msgTerminalNotOpened, err))
+			_ = showNotice(text(msgTerminalNotOpened, err, "sudo "+appName+" update"))
 		}
 	})
 	go onClick(websiteItem, func() { _ = openURL(websiteURL) })
