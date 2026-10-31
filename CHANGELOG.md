@@ -6,7 +6,7 @@ The text of each version is also on its release page on GitHub: https://github.c
 ## Unreleased
 
 The installed version runs the download of an update. So the update from v0.1.2 to this version still shows no progress.
-The progress, the log of the steps and the new limit of the download work from the next update.
+The progress, the log of the steps, the new limit of the download and the fix of the Terminal windows work from the next update.
 
 ### Added
 
@@ -18,6 +18,10 @@ The progress, the log of the steps and the new limit of the download work from t
 
 - A download of a new version stops only if no data comes for 60 seconds. A slow download continues for up to 30 minutes.
   Before, the check and the download together had a limit of 5 minutes, so a slow connection could stop the update.
+
+### Fixed
+
+- "Install vX…" and "Settings…" of the tray menu opened 2 Terminal windows when Terminal was closed. Now they open 1 window.
 
 ## v0.1.2 - 2026-10-31
 

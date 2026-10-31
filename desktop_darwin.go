@@ -26,8 +26,28 @@ func runAsAdministrator(user string, command ...string) error {
 
 // openTerminal opens a Terminal window that runs the command.
 func openTerminal(command string) error {
-	script := "tell application \"Terminal\"\nactivate\ndo script " + quoteAppleScript(command) + "\nend tell"
-	return exec.Command("osascript", "-e", script).Run()
+	return exec.Command("osascript", "-e", buildTerminalScript(command)).Run()
+}
+
+// buildTerminalScript returns the AppleScript of openTerminal. A start of Terminal opens an empty window,
+// and "do script" opens 1 more window. So a closed Terminal runs the command in its first window.
+// An open Terminal gets a new window, so the command does not go into a window that the user works in.
+func buildTerminalScript(command string) string {
+	quoted := quoteAppleScript(command)
+	return `set wasRunning to application "Terminal" is running
+tell application "Terminal"
+	if wasRunning then
+		do script ` + quoted + `
+	else
+		reopen
+		repeat 50 times
+			if (count of windows) > 0 then exit repeat
+			delay 0.1
+		end repeat
+		do script ` + quoted + ` in window 1
+	end if
+	activate
+end tell`
 }
 
 // openLogFile opens the log in the Console app.
