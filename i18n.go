@@ -304,6 +304,24 @@ const (
 	msgTraySettings
 	msgPressEnter
 	msgActionFailed
+	msgUpdateLogStart
+	msgUpdateLogPath
+	msgUpdateCheckStart
+	msgUpdateDownloaded
+	msgUpdateChecksumOK
+	msgUpdateStartInstall
+	msgUpdateDone
+	msgUpdateLogSaved
+	msgUpdateStopped
+	msgDownloadProgress
+	msgDownloadProgressStart
+	msgSizeKB
+	msgSizeMB
+	msgSpeed
+	msgDurationSeconds
+	msgDurationMinutes
+	msgDurationHours
+	msgInstallStartService
 	messageCount
 )
 
@@ -664,4 +682,23 @@ Read what the service does:
 	msgTraySettings:            {"Settings…", "Настройки…"},
 	msgPressEnter:              {"Push Enter or Esc to go back to the menu.", "Нажмите Enter или Esc, чтобы вернуться в меню."},
 	msgActionFailed:            {"The last action did not complete: %v", "Последнее действие не выполнено: %v"},
+	msgUpdateLogStart:          {"A manual update starts. This version is %s.", "Начинается ручное обновление. Текущая версия: %s."},
+	msgUpdateLogPath:           {"The tool writes the steps of the update to %s.", "Программа записывает шаги обновления в %s."},
+	msgUpdateCheckStart:        {"The tool checks GitHub for a new version.", "Программа проверяет новую версию на GitHub."},
+	msgUpdateDownloaded:        {"The tool downloaded %s in %s.", "Программа скачала %s за %s."},
+	msgUpdateChecksumOK:        {"The checksum of the archive is correct.", "Контрольная сумма архива верна."},
+	msgUpdateStartInstall:      {"The tool starts the install of %s.", "Программа запускает установку %s."},
+	msgUpdateDone:              {"The update to %s is complete.", "Обновление до %s завершено."},
+	msgUpdateLogSaved:          {"The steps of the update are in %s.", "Шаги обновления записаны в %s."},
+	msgUpdateStopped:           {"The update stopped: %v", "Обновление остановлено: %v"},
+	// The progress line must stay shorter than 80 characters. TestProgressLineFitsTerminal checks the longest values.
+	msgDownloadProgress:      {"%s of %s · %d%% · %s · %s left", "%s из %s · %d%% · %s · ещё %s"},
+	msgDownloadProgressStart: {"%s of %s · %d%%", "%s из %s · %d%%"},
+	msgSizeKB:                {"%d KB", "%d КБ"},
+	msgSizeMB:                {"%s MB", "%s МБ"},
+	msgSpeed:                 {"%s/s", "%s/с"},
+	msgDurationSeconds:       {"%d s", "%d с"},
+	msgDurationMinutes:       {"%d min %d s", "%d мин %d с"},
+	msgDurationHours:         {"%d h %d min", "%d ч %d мин"},
+	msgInstallStartService:   {"The tool starts the service.", "Программа запускает службу."},
 }

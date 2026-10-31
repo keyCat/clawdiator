@@ -168,6 +168,10 @@ sudo clawdiator update
 Type your password. The command downloads the version from GitHub and checks it with `SHA256SUMS`. Then it installs the version, and the settings stay.
 If the consent text changed, the command shows the new text. Type `yes` to agree. After the update, a notice shows the new version.
 
+The command shows each step. During the download, a line shows the size, the speed and the time to the end.
+The command also writes the steps with the time to `/Library/Application Support/clawdiator/update.log`.
+A slow download continues. If GitHub sends no data for 60 seconds, the download stops with an error. Then run the command again.
+
 The checksum finds a damaged download. It does not find a changed release, because `SHA256SUMS` comes from the same GitHub release.
 
 To check now, select "Check for updates" in the tray menu, or run `clawdiator update --check`. The service accepts 1 such request in 5 seconds.

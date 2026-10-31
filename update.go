@@ -35,8 +35,11 @@ const (
 	// updateFirstCheckDelay is the time from the start of the service to the first check.
 	// After an automatic update, the update job must end before the check removes it.
 	updateFirstCheckDelay = 5 * time.Minute
-	// updateTimeout is the time limit of a check, together with the download and the test of a new version.
+	// updateTimeout is the time limit of the check for the newest version.
 	updateTimeout = 5 * time.Minute
+	// downloadTimeout is the time limit of the download and the test of a new version. A slow connection needs minutes
+	// for the archive, so the limit is large. A download without data stops earlier, after downloadStallTimeout.
+	downloadTimeout = 30 * time.Minute
 	// maxArchiveSize is the maximum size of a release archive and of each binary in it.
 	maxArchiveSize = 100 << 20
 	// updateWaitTimeout is the maximum wait of "update --check" and of the tray for the result of the check.
@@ -44,6 +47,13 @@ const (
 	// updateJobTimeout is the maximum time of the update job. A successful install stops the old service before this time.
 	updateJobTimeout = 5 * time.Minute
 )
+
+// downloadStallTimeout is the maximum time without data in a download. A slow download continues,
+// but a download that sends nothing stops after this time. The tests make it short.
+var downloadStallTimeout = 60 * time.Second
+
+// errDownloadStalled is the cause of the cancel of a download without data.
+var errDownloadStalled = errors.New("the download got no data")
 
 // tagPattern is the only accepted form of a release tag. The tag goes into a URL, a path, a plist and the logs.
 var tagPattern = regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)$`)
@@ -94,12 +104,13 @@ func fetchLatestVersion(ctx context.Context, baseURL string) (string, error) {
 
 // downloadRelease downloads the archive of the tag for the architecture. It checks the archive with SHA256SUMS
 // of the same release, and it unpacks the 2 binaries into dir. It returns the path of the new main binary.
-func downloadRelease(ctx context.Context, baseURL, tag, arch, dir string) (string, error) {
+// progress shows the download of the archive. It can be nil.
+func downloadRelease(ctx context.Context, baseURL, tag, arch, dir string, progress *downloadProgress) (string, error) {
 	if !tagPattern.MatchString(tag) {
 		return "", fmt.Errorf("the tag %q is not correct", tag)
 	}
 	archiveName := appName + "-darwin-" + arch + ".tar.gz"
-	sums, err := downloadFile(ctx, baseURL+"/releases/download/"+tag+"/SHA256SUMS", 1<<20)
+	sums, err := downloadFile(ctx, baseURL+"/releases/download/"+tag+"/SHA256SUMS", 1<<20, nil)
 	if err != nil {
 		return "", err
 	}
@@ -112,7 +123,7 @@ func downloadRelease(ctx context.Context, baseURL, tag, arch, dir string) (strin
 	if wantSum == "" {
 		return "", fmt.Errorf("SHA256SUMS of %s has no line for %s", tag, archiveName)
 	}
-	archive, err := downloadFile(ctx, baseURL+"/releases/download/"+tag+"/"+archiveName, maxArchiveSize)
+	archive, err := downloadFile(ctx, baseURL+"/releases/download/"+tag+"/"+archiveName, maxArchiveSize, progress)
 	if err != nil {
 		return "", err
 	}
@@ -126,7 +137,12 @@ func downloadRelease(ctx context.Context, baseURL, tag, arch, dir string) (strin
 }
 
 // downloadFile returns the body of a GET request. A body that is larger than maxSize is an error.
-func downloadFile(ctx context.Context, url string, maxSize int64) ([]byte, error) {
+// The download stops if no data comes for downloadStallTimeout. progress can be nil.
+func downloadFile(ctx context.Context, url string, maxSize int64, progress *downloadProgress) ([]byte, error) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	stall := time.AfterFunc(downloadStallTimeout, func() { cancel(errDownloadStalled) })
+	defer stall.Stop()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -136,17 +152,53 @@ func downloadFile(ctx context.Context, url string, maxSize int64) ([]byte, error
 	client.CheckRedirect = checkGitHubRedirect
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, err
+		return nil, describeDownloadError(ctx, url, err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%s gave %s", url, response.Status)
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, maxSize+1))
+	if progress != nil {
+		progress.begin(response.ContentLength)
+	}
+	body := &stallReader{reader: response.Body, timer: stall, progress: progress}
+	data, err := io.ReadAll(io.LimitReader(body, maxSize+1))
 	if err == nil && int64(len(data)) > maxSize {
 		err = fmt.Errorf("%s is larger than %d bytes", url, maxSize)
 	}
-	return data, err
+	if progress != nil {
+		progress.end(err)
+	}
+	if err != nil {
+		return nil, describeDownloadError(ctx, url, err)
+	}
+	return data, nil
+}
+
+// stallReader starts the time without data again after each read with data. It also counts the data for the progress.
+type stallReader struct {
+	reader   io.Reader
+	timer    *time.Timer
+	progress *downloadProgress
+}
+
+func (r *stallReader) Read(buffer []byte) (int, error) {
+	count, err := r.reader.Read(buffer)
+	if count > 0 {
+		r.timer.Reset(downloadStallTimeout)
+		if r.progress != nil {
+			r.progress.add(count)
+		}
+	}
+	return count, err
+}
+
+// describeDownloadError tells about a stop without data, in place of the error of the canceled request.
+func describeDownloadError(ctx context.Context, url string, err error) error {
+	if errors.Is(context.Cause(ctx), errDownloadStalled) {
+		return fmt.Errorf("%s sent no data for %v", url, downloadStallTimeout)
+	}
+	return err
 }
 
 // checkGitHubRedirect lets a download follow only https redirects to the hosts of GitHub. GitHub sends the files of a release
@@ -234,7 +286,7 @@ func prepareUpdate(ctx context.Context, dir, tag string) (updateInfo, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return updateInfo{}, err
 	}
-	binary, err := downloadRelease(ctx, releasesURL, tag, runtime.GOARCH, dir)
+	binary, err := downloadRelease(ctx, releasesURL, tag, runtime.GOARCH, dir, nil)
 	if err != nil {
 		return updateInfo{}, err
 	}
@@ -315,34 +367,68 @@ func (in *installer) commandUpdate(args []string) error {
 	if !in.isRoot() {
 		return errorf(msgNeedRoot, "update")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), updateTimeout)
-	defer cancel()
-	tag, err := fetchLatestVersion(ctx, releasesURL)
+	// The steps go to the terminal, and in English with the time to update.log.
+	logPath := filepath.Join(in.paths.Dir, "update.log")
+	stepLog := openUpdateLog(logPath, in.now)
+	defer stepLog.Close()
+	say := func(key messageKey, args ...any) {
+		fmt.Fprintln(in.stdout, text(key, args...))
+		stepLog.writeLine(textIn(languageEnglish, key, args...))
+	}
+	fail := func(key messageKey, args ...any) error {
+		stepLog.writeLine(textIn(languageEnglish, msgUpdateStopped, textIn(languageEnglish, key, args...)))
+		return errorf(key, args...)
+	}
+	stepLog.writeLine(textIn(languageEnglish, msgUpdateLogStart, version))
+	if stepLog != nil {
+		say(msgUpdateLogPath, logPath)
+	}
+	say(msgUpdateCheckStart)
+	checkCtx, cancelCheck := context.WithTimeout(context.Background(), updateTimeout)
+	defer cancelCheck()
+	tag, err := fetchLatestVersion(checkCtx, releasesURL)
 	if err != nil {
-		return errorf(msgUpdateCheckFailed, err)
+		return fail(msgUpdateCheckFailed, err)
 	}
 	if !isNewerVersion(tag, version) {
-		fmt.Fprintln(in.stdout, text(msgUpdateNewest, version))
+		say(msgUpdateNewest, version)
 		return nil
 	}
-	fmt.Fprintln(in.stdout, text(msgUpdateDownload, tag))
+	say(msgUpdateDownload, tag)
 	// Root runs the new binary. A folder in TMPDIR can be in the folder of a user, who can then replace the binary.
 	// Only root can write in the app folder. The automatic update uses the folder "update", so this folder has another name.
 	dir, err := os.MkdirTemp(in.paths.Dir, "manual-update-")
 	if err != nil {
-		return err
+		return fail(msgUpdateDownloadFailed, err)
 	}
 	defer os.RemoveAll(dir)
-	binary, err := downloadRelease(ctx, releasesURL, tag, runtime.GOARCH, dir)
+	// The download has its own limit, because a slow connection needs more time than the check.
+	downloadCtx, cancelDownload := context.WithTimeout(context.Background(), downloadTimeout)
+	defer cancelDownload()
+	outputs := []progressOutput{{writer: in.stdout, lang: currentLanguage, isTerminal: isTerminalWriter(in.stdout)}}
+	if stepLog != nil {
+		outputs = append(outputs, progressOutput{writer: stepLog, lang: languageEnglish})
+	}
+	binary, err := downloadRelease(downloadCtx, releasesURL, tag, runtime.GOARCH, dir, newDownloadProgress(in.now, outputs...))
 	if err != nil {
-		return errorf(msgUpdateDownloadFailed, err)
+		return fail(msgUpdateDownloadFailed, err)
 	}
-	if info, err := readUpdateInfo(ctx, binary); err != nil || info.Version != tag {
-		return errorf(msgUpdateDownloadFailed, fmt.Errorf("the binary of %s does not tell this version: %+v, %v", tag, info, err))
+	say(msgUpdateChecksumOK)
+	if info, err := readUpdateInfo(downloadCtx, binary); err != nil || info.Version != tag {
+		return fail(msgUpdateDownloadFailed, fmt.Errorf("the binary of %s does not tell this version: %+v, %v", tag, info, err))
 	}
+	say(msgUpdateStartInstall, tag)
 	command := exec.Command(binary, "install")
 	command.Stdin, command.Stdout, command.Stderr = in.stdin, in.stdout, os.Stderr
-	return command.Run()
+	if err := command.Run(); err != nil {
+		stepLog.writeLine(textIn(languageEnglish, msgUpdateStopped, err))
+		return err
+	}
+	say(msgUpdateDone, tag)
+	if stepLog != nil {
+		fmt.Fprintln(in.stdout, text(msgUpdateLogSaved, logPath))
+	}
+	return nil
 }
 
 // setAutoUpdate turns the automatic updates on or off in config.json. The service reads the setting at each check.

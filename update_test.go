@@ -143,7 +143,7 @@ func TestDownloadRelease(t *testing.T) {
 	defer server.Close()
 
 	dir := t.TempDir()
-	binary, err := downloadRelease(context.Background(), server.URL, "v1.0.0", "arm64", dir)
+	binary, err := downloadRelease(context.Background(), server.URL, "v1.0.0", "arm64", dir, nil)
 	if err != nil || binary != filepath.Join(dir, "clawdiator") {
 		t.Fatalf("the download = %q, %v", binary, err)
 	}
@@ -157,7 +157,7 @@ func TestDownloadRelease(t *testing.T) {
 	}
 	for _, tag := range []string{"v2.0.0", "v3.0.0", "v4.0.0", "v5.0.0", "v6.0.0", "v7.0.0", "v1.0.0/../../x", "v9.0.0"} {
 		dir := t.TempDir()
-		if _, err := downloadRelease(context.Background(), server.URL, tag, "arm64", dir); err == nil {
+		if _, err := downloadRelease(context.Background(), server.URL, tag, "arm64", dir, nil); err == nil {
 			t.Errorf("%s must give an error", tag)
 		}
 		if entries, _ := os.ReadDir(dir); tag == "v2.0.0" && len(entries) != 0 {
@@ -175,7 +175,7 @@ func TestRealRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	binary, err := downloadRelease(context.Background(), releasesURL, tag, runtime.GOARCH, t.TempDir())
+	binary, err := downloadRelease(context.Background(), releasesURL, tag, runtime.GOARCH, t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -508,5 +508,48 @@ func TestUpdateTexts(t *testing.T) {
 		if view := buildTrayView(&serviceState{Update: update}, false); view.Update != want.Update || view.HasBadge != want.HasBadge {
 			t.Errorf("%+v: the tray item %q and the dot %v, want %q and %v", update, view.Update, view.HasBadge, want.Update, want.HasBadge)
 		}
+	}
+}
+
+// TestDownloadStall checks the limit without data. A server that stops sending fails the download soon after the limit.
+// A slow server that sends a little data each time completes the download, also after more time than the limit.
+func TestDownloadStall(t *testing.T) {
+	defer func(old time.Duration) { downloadStallTimeout = old }(downloadStallTimeout)
+	downloadStallTimeout = 200 * time.Millisecond
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		flusher := w.(http.Flusher)
+		w.Header().Set("Content-Length", "100")
+		for range 10 {
+			_, _ = w.Write(make([]byte, 10))
+			flusher.Flush()
+			wait := 60 * time.Millisecond
+			if r.URL.Path == "/stalled" {
+				wait = 5 * time.Second
+			}
+			// The handler stops at the cancel of the client, so that the server can close.
+			select {
+			case <-time.After(wait):
+			case <-r.Context().Done():
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	start := time.Now()
+	if _, err := downloadFile(context.Background(), server.URL+"/stalled", 1000, nil); err == nil || !strings.Contains(err.Error(), "sent no data for 200ms") {
+		t.Errorf("a download without data must stop with a clear error: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("the download without data stopped after %v, but the limit is %v", elapsed, downloadStallTimeout)
+	}
+	var lines bytes.Buffer
+	progress := newDownloadProgress(time.Now, progressOutput{writer: &lines, lang: languageEnglish})
+	data, err := downloadFile(context.Background(), server.URL+"/slow", 1000, progress)
+	if err != nil || len(data) != 100 {
+		t.Fatalf("a slow download with data must complete: %d bytes, %v", len(data), err)
+	}
+	if !strings.HasPrefix(lines.String(), "The tool downloaded 0 KB in ") {
+		t.Errorf("the progress must end with the size and the time: %q", lines.String())
 	}
 }

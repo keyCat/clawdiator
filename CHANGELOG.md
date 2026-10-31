@@ -3,6 +3,22 @@
 This file lists the changes of each version of clawdiator. The newest version is first.
 The text of each version is also on its release page on GitHub: https://github.com/keyCat/clawdiator/releases
 
+## Unreleased
+
+The installed version runs the download of an update. So the update from v0.1.2 to this version still shows no progress.
+The progress, the log of the steps and the new limit of the download work from the next update.
+
+### Added
+
+- `sudo clawdiator update` shows each step. During the download, a line shows the size, the speed and the time to the end.
+- `sudo clawdiator update` writes its steps with the time to `update.log`, the same file as the automatic update.
+- `install` tells about the start of the service, because the start can wait some seconds for the end of the old service.
+
+### Changed
+
+- A download of a new version stops only if no data comes for 60 seconds. A slow download continues for up to 30 minutes.
+  Before, the check and the download together had a limit of 5 minutes, so a slow connection could stop the update.
+
 ## v0.1.2 - 2026-10-31
 
 To install this version from v0.1.1, select "Install v0.1.2…" in the tray menu, or run `sudo clawdiator update`.

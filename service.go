@@ -326,7 +326,10 @@ func (d *serviceDriver) startUpdateCheck() {
 		done.Latest, done.Err = d.update.latest(ctx)
 		// Without automatic updates, the service only tells about a new version. It downloads nothing.
 		if done.Err == nil && done.IsAuto && isNewerVersion(done.Latest, d.currentVersion) && done.Latest != consentTag {
-			done.Info, done.Err = d.update.prepare(ctx, done.Latest)
+			// The download comes from d.ctx with its own limit, because the limit of the check is too short for a slow connection.
+			downloadCtx, cancelDownload := context.WithTimeout(d.ctx, downloadTimeout)
+			done.Info, done.Err = d.update.prepare(downloadCtx, done.Latest)
+			cancelDownload()
 		}
 		d.sendResult(done)
 	})

@@ -152,6 +152,8 @@ func (in *installer) commandInstall(args []string) error {
 	if err := writeRootFile(in.paths.Config, append(data, '\n'), 0o644); err != nil {
 		return err
 	}
+	// The start can wait some seconds for the end of the old service, so the user sees this step.
+	fmt.Fprintln(in.stdout, text(msgInstallStartService))
 	if err := in.manager.Install(in.paths); err != nil {
 		return errorf(msgCannotRegister, err)
 	}
