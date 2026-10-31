@@ -120,7 +120,7 @@ type serviceDriver struct {
 	// downloadDB downloads the file of the local database for the month, checks it and saves it.
 	downloadDB func(ctx context.Context, month string) (*countryDB, error)
 	// firewall controls the firewall rules for the ranges of Anthropic. It is nil on the systems without these rules.
-	firewall *pfFirewall
+	firewall firewall
 
 	ctx         context.Context
 	results     chan any
@@ -158,8 +158,10 @@ type serviceDriver struct {
 	isFirewallKnown       bool
 	lastFirewallAttempt   time.Time
 	lastFirewallFullCheck time.Time
-	savedFirewall         firewallState
-	savedGeneration       int
+	// lastFirewallError is the last error of the firewall with an event. Only rules that work clear it.
+	lastFirewallError string
+	savedFirewall     firewallState
+	savedGeneration   int
 	// loggedSleepTimeouts is the count of sleepBlockTimeouts in the log.
 	loggedSleepTimeouts int64
 }
@@ -721,10 +723,16 @@ func (d *serviceDriver) applyFirewall(now time.Time) {
 	}
 	state.IsBlocked = isWanted
 	message := getFirewallMessage(err)
+	if isWanted && err == nil {
+		d.lastFirewallError = ""
+	}
 	if message != state.Error {
 		state.Error = message
-		if message != "" {
+		// The removal of the rules clears state.Error. Without this check, each pre-block gives the same notice again,
+		// for example without nft on Linux.
+		if message != "" && message != d.lastFirewallError {
 			d.core.addError(now, message)
+			d.lastFirewallError = message
 		}
 	}
 }
@@ -867,7 +875,7 @@ func runService(ctx context.Context, paths appPaths) error {
 	driver := newServiceDriver(ctx, c, paths, checkOptions)
 	db, dbErr := loadCountryDB(paths.Dir)
 	driver.setCountryDB(db)
-	// Only root can change pf. The real network test runs the service as a normal user.
+	// Only root can change the firewall. The real network test runs the service as a normal user.
 	if driver.firewall != nil && os.Geteuid() != 0 {
 		driver.firewall = nil
 		driver.debugf("firewall", "the service does not run as root, so it does not change the firewall")

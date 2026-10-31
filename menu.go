@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -1031,7 +1032,7 @@ func newConfigScreen(cfg *Config) (*formModel, *configForm) {
 		if cfg.Consent.Version < consentVersion {
 			steps = append(steps, formStep{
 				title:   "clawdiator · " + text(msgConsentTitle),
-				lines:   strings.Split(strings.TrimRight(text(msgConsentText), "\n"), "\n"),
+				lines:   strings.Split(strings.TrimRight(getConsentText(currentLanguage, runtime.GOOS), "\n"), "\n"),
 				buttons: [2]string{text(msgAgree), text(msgBack)},
 			})
 		}

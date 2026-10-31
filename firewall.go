@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -44,16 +45,37 @@ func renderPFRules() string {
 // pfRunner runs pfctl with the arguments and the input. It returns the output and an error for an exit code that is not 0.
 type pfRunner func(input string, args ...string) (string, error)
 
-// runPfctl runs /sbin/pfctl. pfctl writes warnings to its error output also on success, so only the exit code tells a failure.
+// runPfctl runs /sbin/pfctl.
 func runPfctl(input string, args ...string) (string, error) {
-	command := exec.Command("/sbin/pfctl", args...)
+	return runWithInput("/sbin/pfctl", input, args...)
+}
+
+// runWithInput runs the program with the arguments and the input.
+// pfctl writes warnings to its error output also on success, so only the exit code tells a failure.
+func runWithInput(path, input string, args ...string) (string, error) {
+	command := exec.Command(path, args...)
 	command.Stdin = strings.NewReader(input)
 	output, err := command.CombinedOutput()
 	text := string(bytes.TrimSpace(output))
 	if err != nil {
-		return text, fmt.Errorf("pfctl %s: %w: %s", strings.Join(args, " "), err, cleanLogText(text))
+		return text, fmt.Errorf("%s %s: %w: %s", filepath.Base(path), strings.Join(args, " "), err, cleanLogText(text))
 	}
 	return text, nil
+}
+
+// firewall controls the firewall rules for the ranges of Anthropic. The caller keeps the token in state.json.
+// Only the goroutine of the loop of the service uses it.
+type firewall interface {
+	// Block loads the rules. The result is the token to keep.
+	Block(token string) (string, error)
+	// Unblock removes the rules. Rules that do not exist are not an error.
+	Unblock(token string) error
+	// Check repairs the rules. The result is the token to keep, and if the check repaired something.
+	Check(token string, isFull bool) (string, bool, error)
+	// Place returns the place of the rules for the messages, for example "pf anchor com.apple/clawdiator".
+	Place() string
+	// Rules returns the rules for the dry run.
+	Rules() string
 }
 
 // pfFirewall controls the rules of clawdiator in pf. The caller keeps the token of the switch-on of pf.
@@ -66,13 +88,20 @@ type pfFirewall struct {
 	appleAnchorErr error
 }
 
-// newFirewall returns the firewall of the system. Only macOS has firewall rules now. On other systems, the result is nil.
-func newFirewall() *pfFirewall {
-	if runtime.GOOS != "darwin" {
-		return nil
+// newFirewall returns the firewall of the system: pf on macOS, nftables on Linux. On other systems, the result is nil.
+func newFirewall() firewall {
+	switch runtime.GOOS {
+	case "darwin":
+		return &pfFirewall{run: runPfctl}
+	case "linux":
+		return &nftFirewall{run: runNft}
 	}
-	return &pfFirewall{run: runPfctl}
+	return nil
 }
+
+func (f *pfFirewall) Place() string { return "pf anchor " + pfAnchor }
+
+func (f *pfFirewall) Rules() string { return renderPFRules() }
 
 // Block loads the rules, turns pf on and removes the states of the open connections to the ranges.
 // In this order, pf is never on with an empty anchor of clawdiator. The result is the token to keep.

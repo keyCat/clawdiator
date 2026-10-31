@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -206,7 +207,7 @@ func TestInstallMenuOptions(t *testing.T) {
 	if cfg, _ := loadConfig(in.paths.Config); !cfg.AutoUpdate {
 		t.Error("--auto-update on must turn on the automatic updates")
 	}
-	if !strings.Contains(stdout.String(), strings.TrimSpace(text(msgConsentText))) || strings.Contains(stdout.String(), text(msgConsentPrompt)) {
+	if !strings.Contains(stdout.String(), strings.TrimSpace(getConsentText(currentLanguage, runtime.GOOS))) || strings.Contains(stdout.String(), text(msgConsentPrompt)) {
 		t.Errorf("with --yes, install must show the consent text without the question:\n%s", stdout.String())
 	}
 	if err := in.commandInstall([]string{"--auto-update", "maybe"}); err == nil {

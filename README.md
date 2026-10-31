@@ -16,7 +16,7 @@ A service runs in the background as root. It finds the country of the public IP 
 - The service allows a provider only if each reply gives an allowed country. If the check fails, the service blocks.
 - The block has 2 parts:
   - Entries in the hosts file for the sites of Anthropic and OpenAI.
-  - Firewall rules of pf for the address ranges of Anthropic. Only macOS has these rules now.
+  - Firewall rules for the address ranges of Anthropic: pf on macOS, nftables on Linux.
 - The service blocks both providers at the start, at each change of the network and before each sleep. This pre-block stays until a full check passes.
 - A notice tells you about each block and each unblock. An icon in the menu bar shows the state.
 
@@ -115,7 +115,8 @@ sudo ./clawdiator install
 | Part | On Linux |
 |---|---|
 | Service | The systemd unit `clawdiator.service`. systemd starts it again after a stop. |
-| Block | Only the entries in `/etc/hosts`. The firewall rules for Anthropic come in a later version. |
+| Block | The entries in `/etc/hosts`, and the table `inet clawdiator` of nftables for the address ranges of Anthropic. |
+| Firewall | The table drops the packets of this computer. It also drops the packets of the containers and the virtual machines that use NAT, for example Docker. A different firewall, for example ufw or firewalld, does not cancel these rules. The table needs the program `nft`. Without it, only the hosts file blocks. Then a notice tells about the problem, and `clawdiator status` shows a CAUTION during a block. |
 | Notices and tray icon | Global user units of systemd. They start with `graphical-session.target`, for example in GNOME and KDE Plasma. A desktop without this target, for example XFCE, gets no notices and no tray icon. The service still blocks. |
 | Tray icon in GNOME | GNOME shows the icon only with the AppIndicator extension. |
 | Password window | "Pause" in the tray asks for the password through polkit. |
@@ -239,12 +240,15 @@ If a block stays and the service is gone, remove the block with this command:
 sudo clawdiator hosts --remove
 ```
 
-If the tool does not work at all on macOS, remove the firewall rules with this command.
-Then edit `/private/etc/hosts` as root. Remove the line that starts with `# BEGIN clawdiator`, the line `# END clawdiator` and all lines between them.
-On Linux, edit `/etc/hosts` as root in the same way. Linux has no firewall rules of clawdiator yet.
+If the tool does not work at all, remove the firewall rules with the command for your system.
+Then edit the hosts file as root: `/private/etc/hosts` on macOS, `/etc/hosts` on Linux.
+Remove the line that starts with `# BEGIN clawdiator`, the line `# END clawdiator` and all lines between them.
 
 ```sh
+# macOS
 sudo pfctl -a com.apple/clawdiator -F rules
+# Linux
+sudo nft delete table inet clawdiator
 ```
 
 ## Privacy
@@ -266,6 +270,7 @@ The tool is a safety net. It does not guarantee that the use follows the policie
 
 - With a VPN, the check sees the country of the VPN exit, not the physical location.
 - A proxy, iCloud Private Relay, a virtual machine or a Docker container can go past the block.
+  On Linux, the firewall rules also stop Anthropic in the containers and the virtual machines that use NAT. But the hosts file does not cover them, so OpenAI still opens there.
 - An app that goes past the hosts file waits for a timeout instead of an error. The firewall rules stop such an app only for Anthropic, because OpenAI uses shared addresses of Cloudflare.
 
 ## Build from the source
@@ -303,6 +308,7 @@ MIT. Read [LICENSE](LICENSE). Each archive also contains `THIRD_PARTY_LICENSES.t
 - macOS on a Mac with an Intel processor: not tested.
 - macOS 12 to macOS 25: not tested. Go 1.26 supports macOS 12.
 - Linux: tested on 2026-10-31 in a virtual machine with Ubuntu 26.04 on arm64, without a desktop.
-  The tests covered the service, the block, the change of the network, the pause, the check for updates and the uninstallation.
+  The tests covered the service, the block with the hosts file and with nftables, the change of the network, the pause,
+  the check for updates and the uninstallation.
   The notices, the tray icon, a real sleep and Linux on amd64 are not tested.
 - Windows: not ready.

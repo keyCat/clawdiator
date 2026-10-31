@@ -494,11 +494,11 @@ func TestUninstallAndRemoveBlockRemoveFirewall(t *testing.T) {
 			t.Fatal(err)
 		}
 		stdout.Reset()
-		want := "OK      remove the firewall rules and release the switch-on of pf"
+		want := "OK      remove the firewall rules"
 		if command == "uninstall" {
 			err = in.commandUninstall()
 		} else {
-			err, want = in.commandRemoveBlock(), "The firewall rules of the pf anchor com.apple/clawdiator are removed."
+			err, want = in.commandRemoveBlock(), "The firewall rules are removed: pf anchor com.apple/clawdiator."
 		}
 		if err != nil || pf.anchor != "" || len(pf.tokens) != 0 || !strings.Contains(stdout.String(), want) {
 			t.Errorf("%s must remove the rules and release the token: %v, %+v\n%s", command, err, pf, stdout.String())

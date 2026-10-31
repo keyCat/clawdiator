@@ -32,7 +32,7 @@ type installer struct {
 	// downloadDB downloads the file of the local database for the month into the app folder.
 	downloadDB func(ctx context.Context, month string) (*countryDB, error)
 	// firewall controls the firewall rules. It is nil on the systems without these rules.
-	firewall *pfFirewall
+	firewall firewall
 	// serviceStopTimeout is the maximum time to wait for the end of the service process.
 	// launchd sends SIGKILL 20 seconds after SIGTERM, so 30 seconds is enough.
 	serviceStopTimeout time.Duration
@@ -136,7 +136,7 @@ func (in *installer) commandInstall(args []string) error {
 		if *isUnattended {
 			return errorf(msgConsentNeeded)
 		}
-		fmt.Fprint(in.stdout, text(msgConsentText))
+		fmt.Fprint(in.stdout, getConsentText(currentLanguage, runtime.GOOS))
 		// The menu shows the consent page before it runs install with --yes. Then the question is not necessary.
 		if !*isYes {
 			fmt.Fprint(in.stdout, text(msgConsentPrompt))
@@ -367,7 +367,7 @@ func (in *installer) commandRemoveBlock() error {
 	if err := in.removeFirewall(); err != nil {
 		return err
 	}
-	fmt.Fprintln(in.stdout, text(msgFirewallRemoved, pfAnchor))
+	fmt.Fprintln(in.stdout, text(msgFirewallRemoved, in.firewall.Place()))
 	return nil
 }
 

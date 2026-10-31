@@ -323,6 +323,8 @@ const (
 	msgDurationHours
 	msgInstallStartService
 	msgPressEnterToClose
+	msgConsentFirewallMacOS
+	msgConsentFirewallLinux
 	messageCount
 )
 
@@ -415,8 +417,7 @@ The local country database: ` + dbCredit + `, license CC BY 4.0.
 Read what the service does:
 
   1. It changes the hosts file. In an unsupported country, the sites of Anthropic and OpenAI do not open
-     in any program. During a block, it also turns on the firewall of macOS and blocks the addresses
-     of Anthropic.
+     in any program. %s
   2. Every 30 seconds, it sends a request to Cloudflare. At each full check, it also sends a request
      to the location services. Each service sees your public IP address.
      Each month, it downloads the country database of DB-IP from db-ip.com.
@@ -432,8 +433,7 @@ Read what the service does:
 Прочитайте, что делает служба:
 
   1. Она изменяет файл hosts. В неподдерживаемой стране сайты Anthropic и OpenAI не открываются
-     ни в одной программе. Во время блокировки она также включает брандмауэр macOS и блокирует адреса
-     Anthropic.
+     ни в одной программе. %s
   2. Каждые 30 секунд она отправляет запрос в Cloudflare. При каждой полной проверке она также отправляет
      запрос сервисам местоположения. Каждый сервис видит ваш публичный IP-адрес.
      Каждый месяц она скачивает базу стран DB-IP с сайта db-ip.com.
@@ -470,12 +470,12 @@ Read what the service does:
 	msgStepRemoveLink:      {"remove the link of the command", "удалить ссылку команды"},
 	msgStepRemoveSockets:   {"remove the sockets", "удалить сокеты"},
 	msgStepRemoveFolder:    {"remove the app folder, the config and the logs", "удалить папку приложения, настройки и журналы"},
-	msgStepRemoveFirewall:  {"remove the firewall rules and release the switch-on of pf", "удалить правила брандмауэра и освободить включение pf"},
-	msgFirewallRemoved:     {"The firewall rules of the pf anchor %s are removed.", "Правила брандмауэра в якоре pf %s удалены."},
+	msgStepRemoveFirewall:  {"remove the firewall rules", "удалить правила брандмауэра"},
+	msgFirewallRemoved:     {"The firewall rules are removed: %s.", "Правила брандмауэра удалены: %s."},
 	msgStatusFirewallOn:    {"Firewall: the address ranges of Anthropic are blocked.", "Брандмауэр: диапазоны адресов Anthropic заблокированы."},
 	msgStatusFirewallError: {"CAUTION: the firewall has a problem: %s", "ВНИМАНИЕ: у брандмауэра проблема: %s"},
-	msgDryRunFirewall: {"During a block of Anthropic, the service also loads this rule into the pf anchor %s (ranges from %s):",
-		"Во время блокировки Anthropic служба также загружает это правило в якорь pf %s (диапазоны от %s):"},
+	msgDryRunFirewall: {"During a block of Anthropic, the service also loads these rules into the firewall (%s, ranges from %s):",
+		"Во время блокировки Anthropic служба также загружает эти правила в брандмауэр (%s, диапазоны от %s):"},
 	msgStepRemoveUserFiles: {"remove the files of the notices in the home folders of the users",
 		"удалить файлы уведомлений в домашних папках пользователей"},
 	msgUserFolderKept: {"        %s has other files, so the tool kept the folder. Remove it manually if you do not need the files.",
@@ -703,4 +703,18 @@ Read what the service does:
 	msgDurationHours:         {"%d h %d min", "%d ч %d мин"},
 	msgInstallStartService:   {"The tool starts the service.", "Программа запускает службу."},
 	msgPressEnterToClose:     {"Push Enter to close the window.", "Нажмите Enter, чтобы закрыть окно."},
+	// The text of macOS is a part of consentVersion 4. A change of it needs a new consentVersion.
+	msgConsentFirewallMacOS: {"During a block, it also turns on the firewall of macOS and blocks the addresses\n     of Anthropic.",
+		"Во время блокировки она также включает брандмауэр macOS и блокирует адреса\n     Anthropic."},
+	msgConsentFirewallLinux: {"During a block, it also blocks the addresses of Anthropic with rules\n     in the firewall of Linux (nftables).",
+		"Во время блокировки она также блокирует адреса Anthropic правилами\n     в брандмауэре Linux (nftables)."},
+}
+
+// getConsentText returns the consent text for the system. Each system has its own sentence about the firewall.
+func getConsentText(lang language, goos string) string {
+	firewall := msgConsentFirewallMacOS
+	if goos == "linux" {
+		firewall = msgConsentFirewallLinux
+	}
+	return textIn(lang, msgConsentText, textIn(lang, firewall))
 }

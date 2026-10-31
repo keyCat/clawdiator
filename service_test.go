@@ -796,6 +796,50 @@ func TestDriverFirewallCheckAndErrors(t *testing.T) {
 	}
 }
 
+// Without nft, each pre-block fails in the same way. Only the first failure adds an event, so only 1 notice comes.
+// After rules that work, the same error adds an event again.
+func TestDriverFirewallErrorOnceForPreBlocks(t *testing.T) {
+	td := newTestDriver(t)
+	nft := &fakeNft{isMissing: true}
+	td.firewall = &nftFirewall{run: nft.run}
+	countErrors := func() int {
+		count := 0
+		for _, change := range td.core.state.Events {
+			if change.Kind == eventError && change.Error == getFirewallMessage(errNftMissing) {
+				count++
+			}
+		}
+		return count
+	}
+	td.step()
+	check := td.nextCheck()
+	for i, fingerprint := range []string{"hotel", "hotel-2", "hotel-3"} {
+		check.reply <- newResult("DE", "DE", "DE")
+		td.handleResult(td.waitCheckResult())
+		td.afterStep(false)
+		if td.core.state.Firewall.IsBlocked || td.core.state.Firewall.Error != "" {
+			t.Fatalf("pass %d: an allowed country must remove the block and the error: %+v", i, td.core.state.Firewall)
+		}
+		check = td.changeNetwork(fingerprint)
+		if td.core.state.Firewall.Error == "" {
+			t.Fatalf("pass %d: the pre-block must fail without nft", i)
+		}
+	}
+	if got := countErrors(); got != 1 {
+		t.Errorf("3 pre-blocks without nft must add 1 error event, not %d", got)
+	}
+
+	nft.isMissing = false
+	td.lastFirewallAttempt = time.Time{}
+	td.step()
+	nft.isMissing = true
+	td.lastFirewallAttempt = time.Time{}
+	td.step()
+	if got := countErrors(); got != 2 {
+		t.Errorf("after rules that work, the error must add an event again: %d events", got)
+	}
+}
+
 // A new process of the service takes over the token of the old process. pf then still has exactly 1 token of clawdiator.
 func TestDriverFirewallTakesOverToken(t *testing.T) {
 	pf := newFakePF()

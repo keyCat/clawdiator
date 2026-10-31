@@ -149,9 +149,11 @@ func commandHosts(hostsPath string, args []string, stdout io.Writer, removeBlock
 	for _, command := range getDNSFlushCommands(runtime.GOOS) {
 		fmt.Fprintln(stdout, "  "+strings.Join(command, " "))
 	}
-	if newFirewall() != nil && slices.Contains(providers, geocheck.Anthropic) {
-		fmt.Fprintln(stdout, text(msgDryRunFirewall, pfAnchor, anthropicRangesDate))
-		fmt.Fprint(stdout, "  "+renderPFRules())
+	if rules := newFirewall(); rules != nil && slices.Contains(providers, geocheck.Anthropic) {
+		fmt.Fprintln(stdout, text(msgDryRunFirewall, rules.Place(), anthropicRangesDate))
+		for _, line := range strings.Split(strings.TrimRight(rules.Rules(), "\n"), "\n") {
+			fmt.Fprintln(stdout, "  "+line)
+		}
 	}
 	return nil
 }
