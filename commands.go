@@ -83,6 +83,7 @@ func (in *installer) commandInstall(args []string) error {
 	geoServices := flags.String("geo-services", "", text(msgFlagGeoServices, strings.Join(geocheck.DefaultServiceNames(), ",")))
 	geoMinReplies := flags.Int("geo-min-replies", 0, text(msgFlagGeoMinReplies))
 	blockedCountries := flags.String("blocked-countries", "", text(msgFlagBlockedCountries))
+	autoUpdate := flags.String("auto-update", "", text(msgFlagAutoUpdate))
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -108,6 +109,12 @@ func (in *installer) commandInstall(args []string) error {
 	if isSet["blocked-countries"] {
 		cfg.BlockedCountries = splitList(*blockedCountries, true)
 	}
+	if isSet["auto-update"] {
+		if *autoUpdate != "on" && *autoUpdate != "off" {
+			return errorf(msgAutoUpdateValue)
+		}
+		cfg.AutoUpdate = *autoUpdate == "on"
+	}
 	if _, err := getGeoOptions(cfg); err != nil {
 		return err
 	}
@@ -117,6 +124,10 @@ func (in *installer) commandInstall(args []string) error {
 			return errorf(msgConsentNeeded)
 		}
 		fmt.Fprint(in.stdout, text(msgConsentText))
+		// The menu shows the consent page before it runs install with --yes. Then the question is not necessary.
+		if !*isYes {
+			fmt.Fprint(in.stdout, text(msgConsentPrompt))
+		}
 		if !*isYes && !readYes(in.stdin) {
 			return errorf(msgConsentDeclined)
 		}

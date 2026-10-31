@@ -72,7 +72,10 @@ These 2 cases are still to confirm in a test of the first release.
 sudo ./clawdiator install
 ```
 
-The tool shows the consent text. Read it. Then type `yes`. The `install` command does these steps:
+The tool shows the consent text. Read it. Then type `yes`.
+You can also run `./clawdiator` without a command. Then the configuration screen opens. Read "Menu".
+
+The `install` command does these steps:
 
 1. It copies the 2 binaries to `/Library/Application Support/clawdiator/bin`.
 2. It writes the settings to `/Library/Application Support/clawdiator/config.json`.
@@ -88,7 +91,29 @@ To change a setting, run `install` again with the option. The other settings sta
 | `--blocked-countries` | none | More country codes to block for both providers, separated by commas, for example `AF`. An empty value removes them. |
 | `--geo-services` | `cloudflare,ipwho.is,geojs.io` | The location services of the full check, separated by commas. |
 | `--geo-min-replies` | `2` | The minimum number of correct replies of the location services. |
+| `--auto-update` | `off` | `on` lets the service install each new version automatically. Read "Updates". |
 | `--yes` | off | Agree to the consent text without the question. |
+
+## Menu
+
+Run `clawdiator` without a command in a terminal. The menu shows the country, the result for each provider and a pause.
+Use the arrow keys to select an item. Then push Enter.
+
+| Item | Action |
+|---|---|
+| Configuration | Shows all settings on 1 screen: the blocked countries, the location services and the automatic updates. A line shows the country and the result for the values on the screen. |
+| Notices | Sets the notices about a pre-block for your user. It needs no administrator password. |
+| Pause… or Resume | Stops the block for a time, or ends the pause. |
+| Uninstall | Removes the tool after a question. |
+| Exit | Closes the menu. |
+
+"Save" on the configuration screen shows the consent text if it is new, and then a summary.
+Then the tool runs `sudo clawdiator install` with the new settings in the terminal. Type your password.
+The menu runs `pause`, `resume` and `uninstall` with `sudo` in the same way. After the command, push Enter or Esc to go back to the menu.
+
+Each cancel goes back to the menu. Esc in the menu closes it. After "Uninstall", the tool closes.
+Without an installation, `clawdiator` opens the configuration screen at once.
+The item "Settings…" of the tray menu opens the menu in Terminal.
 
 ## Use
 
@@ -104,7 +129,7 @@ To change a setting, run `install` again with the option. The other settings sta
 | `clawdiator version` | Shows the version. |
 | `clawdiator help` | Shows the help. |
 
-The menu of the tray icon also has "Check now", "Pause", the setting of the notices after a wake, and "Log".
+The menu of the tray icon also has "Check now", "Pause", the setting of the notices after a wake, "Settings…" and "Log".
 "Log" opens the log or the verbose log in the Console app. The last line of the menu shows the version.
 "Hide the icon" removes the icon until the next login. The notices continue. `clawdiator agent --show` shows the icon again.
 

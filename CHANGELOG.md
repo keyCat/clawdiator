@@ -3,6 +3,19 @@
 This file lists the changes of each version of clawdiator. The newest version is first.
 The text of each version is also on its release page on GitHub: https://github.com/keyCat/clawdiator/releases
 
+## Unreleased
+
+### Added
+
+- The menu: run `clawdiator` without a command in a terminal. It has the items "Configuration", "Notices", "Pause…" or "Resume", "Uninstall" and "Exit".
+  The configuration screen shows the country and the result for the values on the screen.
+- The item "Settings…" of the tray menu opens the menu in Terminal.
+- The option `install --auto-update on|off`.
+
+### Changed
+
+- With `install --yes`, the tool shows the consent text without the question.
+
 ## v0.1.1 - 2026-10-29
 
 Before you install this version, read these 2 notes:

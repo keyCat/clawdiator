@@ -102,6 +102,7 @@ const (
 	msgMinRepliesInvalid
 	msgCannotReadConfig
 	msgConsentText
+	msgConsentPrompt
 	msgConsentDeclined
 	msgCannotCopyBinary
 	msgCannotRegister
@@ -240,6 +241,69 @@ const (
 	msgStatusAutoUpdateOff
 	msgUpdateRunning
 	msgTerminalNotOpened
+	msgNoChanges
+	msgNoticesSaved
+	msgMenuConfigure
+	msgMenuNotices
+	msgMenuPause
+	msgMenuResume
+	msgMenuUninstall
+	msgMenuExit
+	msgMenuPausedForever
+	msgMenuPausedUntil
+	msgPauseQuestion
+	msgUninstallQuestion
+	msgUninstallDescription
+	msgRemove
+	msgCancel
+	msgSave
+	msgBack
+	msgDone
+	msgAgree
+	msgYes
+	msgNo
+	msgNone
+	msgCountryUnknown
+	msgCountryLookup
+	msgCountryNow
+	msgCountryOpen
+	msgCountryBlocked
+	msgKeysMenu
+	msgKeysButtons
+	msgKeysForm
+	msgKeysServices
+	msgFieldBlockedCountries
+	msgHintBlockedCountries
+	msgCountryCodeNotValid
+	msgFieldGeoServices
+	msgHintGeoServicesLink
+	msgGeoServicesLink
+	msgSelectOneService
+	msgFieldGeoMinReplies
+	msgHintGeoMinReplies
+	msgHintDoneButton
+	msgHintGeoService
+	msgGeoServiceUndocumented
+	msgHintAutoUpdate
+	msgHintSaveButtons
+	msgConsentTitle
+	msgSummaryTitle
+	msgSummaryBlockedCountries
+	msgSummaryGeoServices
+	msgSummaryAutoUpdate
+	msgSummaryConfirm
+	msgNoticesPreview
+	msgFieldNoticesAll
+	msgHintNoticesAll
+	msgFieldNoticeSeconds
+	msgHintNoticeSeconds
+	msgNoticeSecondsInvalid
+	msgHintNoticesButtons
+	msgFlagAutoUpdate
+	msgAutoUpdateValue
+	msgTraySettings
+	msgPressEnter
+	msgActionFailed
 	messageCount
 )
 
@@ -252,6 +316,7 @@ Usage:
   clawdiator <command> [options]
 
 Commands:
+  (none)       Opens the menu. It needs a terminal.
   install      Saves the settings and the consent. Registers and starts the service. Needs sudo.
   uninstall    Removes the service, the block and the files. Needs sudo.
   update       Installs the newest version from GitHub. Needs sudo.
@@ -274,6 +339,7 @@ The local country database: ` + dbCredit + `, license CC BY 4.0.
   clawdiator <команда> [параметры]
 
 Команды:
+  (нет)        Открывает меню. Нужен терминал.
   install      Сохраняет настройки и согласие. Регистрирует и запускает службу. Нужен sudo.
   uninstall    Удаляет службу, блокировку и файлы. Нужен sudo.
   update       Устанавливает новейшую версию с GitHub. Нужен sudo.
@@ -342,7 +408,7 @@ Read what the service does:
      It installs a new version only if you turn on the automatic updates in the menu, or if you run
      "sudo clawdiator update". An automatic update never installs a version with a new consent text.
 
-Type "yes" to agree: `,
+`,
 		`clawdiator блокирует Anthropic и OpenAI на этом компьютере, когда компьютер находится в неподдерживаемой стране.
 Прочитайте, что делает служба:
 
@@ -360,8 +426,9 @@ Type "yes" to agree: `,
      или выполните "sudo clawdiator update". Автоматическое обновление никогда не устанавливает версию
      с новым текстом согласия.
 
-Введите "да" или "yes", чтобы согласиться: `,
+`,
 	},
+	msgConsentPrompt:    {`Type "yes" to agree: `, `Введите "да" или "yes", чтобы согласиться: `},
 	msgConsentDeclined:  {"you did not agree, so the tool changed nothing", "вы не согласились, поэтому программа ничего не изменила"},
 	msgCannotCopyBinary: {"cannot copy the binary to the app folder: %w", "не удалось скопировать программу в папку приложения: %w"},
 	msgCannotRegister:   {"cannot register the service: %w", "не удалось зарегистрировать службу: %w"},
@@ -534,4 +601,67 @@ Type "yes" to agree: `,
 		"Служба устанавливает новую версию сейчас. После обновления придёт уведомление."},
 	msgTerminalNotOpened: {"The tray did not open Terminal: %v. Run \"sudo clawdiator update\" in Terminal.",
 		"Значок не открыл Терминал: %v. Выполните \"sudo clawdiator update\" в Терминале."},
+	msgNoChanges:               {"No changes.", "Без изменений."},
+	msgNoticesSaved:            {"The notice settings are saved.", "Настройки уведомлений сохранены."},
+	msgMenuConfigure:           {"Configuration", "Настройки"},
+	msgMenuNotices:             {"Notices", "Уведомления"},
+	msgMenuPause:               {"Pause…", "Пауза…"},
+	msgMenuResume:              {"Resume", "Снять паузу"},
+	msgMenuUninstall:           {"Uninstall", "Удалить"},
+	msgMenuExit:                {"Exit", "Выход"},
+	msgMenuPausedForever:       {"Pause with no end.", "Пауза без срока."},
+	msgMenuPausedUntil:         {"Pause until %s.", "Пауза до %s."},
+	msgPauseQuestion:           {"Stop the block for how long? The tool asks for the administrator password.", "На какое время снять блокировку? Программа попросит пароль администратора."},
+	msgUninstallQuestion:       {"Remove clawdiator from this computer?", "Удалить clawdiator с этого компьютера?"},
+	msgUninstallDescription:    {"The tool removes the service, the block, the firewall rules and the files. It asks for the administrator password.", "Программа удалит службу, блокировку, правила брандмауэра и файлы. Она попросит пароль администратора."},
+	msgRemove:                  {"Remove", "Удалить"},
+	msgCancel:                  {"Cancel", "Отмена"},
+	msgSave:                    {"Save", "Сохранить"},
+	msgBack:                    {"Back", "Назад"},
+	msgDone:                    {"Done", "Готово"},
+	msgAgree:                   {"I agree", "Согласен"},
+	msgYes:                     {"Yes", "Да"},
+	msgNo:                      {"No", "Нет"},
+	msgNone:                    {"none", "нет"},
+	msgCountryUnknown:          {"Now: the country is not known", "Сейчас: страна неизвестна"},
+	msgCountryLookup:           {"Now: the check runs…", "Сейчас: идёт проверка…"},
+	msgCountryNow:              {"Now: %s", "Сейчас: %s"},
+	msgCountryOpen:             {"open: %s", "открыт: %s"},
+	msgCountryBlocked:          {"blocked: %s", "заблокирован: %s"},
+	msgKeysMenu:                {"↑/↓ select · Enter open · Esc exit", "↑/↓ выбор · Enter открыть · Esc выход"},
+	msgKeysButtons:             {"←/→ select · Enter confirm · Esc back", "←/→ выбор · Enter подтвердить · Esc назад"},
+	msgKeysForm:                {"↑/↓ move · ←/→ or Space change · Enter next · Esc cancel", "↑/↓ переход · ←/→ или Пробел изменить · Enter далее · Esc отмена"},
+	msgKeysServices:            {"↑/↓ move · Space select · ←/→ change the number · Esc back", "↑/↓ переход · Пробел выбрать · ←/→ изменить число · Esc назад"},
+	msgFieldBlockedCountries:   {"Blocked countries", "Страны блокировки"},
+	msgHintBlockedCountries:    {"More country codes to block for both providers, separated by commas, for example AF, MM. Leave the field empty to block only the countries that the providers do not support.", "Дополнительные коды стран, где нужно блокировать обоих провайдеров, через запятую, например AF, MM. Оставьте поле пустым, чтобы блокировать только страны, которые провайдеры не поддерживают."},
+	msgCountryCodeNotValid:     {"%q is not a 2-letter country code, for example AF", "%q — не двухбуквенный код страны, например AF"},
+	msgFieldGeoServices:        {"Location services", "Сервисы местоположения"},
+	msgHintGeoServicesLink:     {"The services that the full check asks. Each service sees the public IP address. Press Enter to change them.", "Сервисы, которые опрашивает полная проверка. Каждый сервис видит публичный IP-адрес. Нажмите Enter, чтобы изменить их."},
+	msgGeoServicesLink:         {"%d selected, minimum %d ›", "выбрано %d, минимум %d ›"},
+	msgSelectOneService:        {"select at least 1 location service", "выберите хотя бы 1 сервис местоположения"},
+	msgFieldGeoMinReplies:      {"Minimum of replies", "Минимум ответов"},
+	msgHintGeoMinReplies:       {"The full check needs this number of correct replies. The local database of DB-IP counts as 1 of them.", "Полной проверке нужно столько правильных ответов. Локальная база DB-IP считается одним из них."},
+	msgHintDoneButton:          {"Go back to the configuration.", "Вернуться к настройкам."},
+	msgHintGeoService:          {"%s · gives the region: %s.", "%s · сообщает регион: %s."},
+	msgGeoServiceUndocumented:  {"This address has no public documentation, so it can stop working.", "У этого адреса нет публичной документации, поэтому он может перестать работать."},
+	msgHintAutoUpdate:          {"The service installs each new version without a question. A version with a new consent text always waits for you.", "Служба устанавливает каждую новую версию без вопроса. Версия с новым текстом согласия всегда ждёт вас."},
+	msgHintSaveButtons:         {"Save shows the summary. Then the tool asks for the administrator password and saves the settings.", "Сохранить покажет итог. Затем программа попросит пароль администратора и сохранит настройки."},
+	msgConsentTitle:            {"Consent", "Согласие"},
+	msgSummaryTitle:            {"Summary", "Итог"},
+	msgSummaryBlockedCountries: {"Blocked countries: %s", "Страны блокировки: %s"},
+	msgSummaryGeoServices:      {"Location services: %s, minimum %d", "Сервисы местоположения: %s, минимум %d"},
+	msgSummaryAutoUpdate:       {"Install updates automatically: %s", "Устанавливать обновления автоматически: %s"},
+	msgSummaryConfirm:          {"Save these settings? The tool asks for the administrator password.", "Сохранить эти настройки? Программа попросит пароль администратора."},
+	msgNoticesPreview:          {"A pre-block starts at each change of the network and before each sleep.", "Предблокировка начинается при каждой смене сети и перед каждым сном."},
+	msgFieldNoticesAll:         {"Notice for each pre-block", "Уведомлять о каждой предблокировке"},
+	msgHintNoticesAll:          {"Yes: a notice at the start and at the end of each pre-block. No: a notice only for a long pre-block.", "Да: уведомление в начале и в конце каждой предблокировки. Нет: уведомление только о долгой предблокировке."},
+	msgFieldNoticeSeconds:      {"Long pre-block, seconds", "Долгая предблокировка, секунд"},
+	msgHintNoticeSeconds:       {"A pre-block that lasts longer than this time gives a notice. From 5 to 300 seconds.", "Предблокировка дольше этого времени даёт уведомление. От 5 до 300 секунд."},
+	msgNoticeSecondsInvalid:    {"type a number from 5 to 300", "введите число от 5 до 300"},
+	msgHintNoticesButtons:      {"Save writes the settings for your user. It needs no administrator password.", "Сохранить запишет настройки для вашего пользователя. Пароль администратора не нужен."},
+	msgFlagAutoUpdate:          {"on or off: install new versions automatically", "on или off: устанавливать новые версии автоматически"},
+	msgAutoUpdateValue:         {"--auto-update takes on or off", "--auto-update принимает on или off"},
+	msgTraySettings:            {"Settings…", "Настройки…"},
+	msgPressEnter:              {"Push Enter or Esc to go back to the menu.", "Нажмите Enter или Esc, чтобы вернуться в меню."},
+	msgActionFailed:            {"The last action did not complete: %v", "Последнее действие не выполнено: %v"},
 }

@@ -24,7 +24,15 @@ var version = "dev"
 func main() {
 	currentLanguage = detectLanguage()
 	if len(os.Args) < 2 {
-		fmt.Print(text(msgUsage))
+		// The menu needs a terminal. A script without a terminal gets the help.
+		if !isTerminal() {
+			fmt.Print(text(msgUsage))
+			return
+		}
+		if err := runUI(getAppPaths()); err != nil {
+			fmt.Fprintln(os.Stderr, text(msgErrorPrefix), err)
+			os.Exit(1)
+		}
 		return
 	}
 	paths := getAppPaths()

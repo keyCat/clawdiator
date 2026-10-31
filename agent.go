@@ -400,6 +400,15 @@ func buildTrayView(state *serviceState, isServiceDown bool) trayView {
 	return view
 }
 
+// pauseChoices are the durations of a pause in the tray and in the menu. An empty value means a pause with no end.
+var pauseChoices = []struct {
+	label messageKey
+	value string
+}{
+	{msgTrayPause30m, "30m"}, {msgTrayPause1h, "1h"}, {msgTrayPause4h, "4h"},
+	{msgTrayPause1d, "1d"}, {msgTrayPause3d, "3d"}, {msgTrayPauseForever, ""},
+}
+
 // getWaitingUpdate returns the newer version that waits for the user, or an empty text. With automatic updates,
 // a version waits only if its install failed or if it has a new consent text.
 func getWaitingUpdate(state *serviceState) string {

@@ -14,15 +14,6 @@ import (
 // trayIsBuilt tells that this binary has the tray. The release builds clawdiator-tray with the tray tag and cgo.
 const trayIsBuilt = true
 
-// pauseChoices are the durations of the "Pause" submenu. An empty value means a pause with no end.
-var pauseChoices = []struct {
-	label messageKey
-	value string
-}{
-	{msgTrayPause30m, "30m"}, {msgTrayPause1h, "1h"}, {msgTrayPause4h, "4h"},
-	{msgTrayPause1d, "1d"}, {msgTrayPause3d, "3d"}, {msgTrayPauseForever, ""},
-}
-
 // commandTray is the start point of the tray. A LaunchAgent starts it at each login, as the user.
 // "Hide the icon" stops this process with exit code 0. The LaunchAgent then does not start it again until the next login.
 // The notices continue, because the notice agent is a separate process.
@@ -59,6 +50,7 @@ func startTray(paths appPaths) {
 	longItem := noticesItem.AddSubMenuItem(text(msgTrayNoticesLong), "")
 	allItem := noticesItem.AddSubMenuItem(text(msgTrayNoticesAll), "")
 	systray.AddSeparator()
+	settingsItem := systray.AddMenuItem(text(msgTraySettings), "")
 	logItem := systray.AddMenuItem(text(msgTrayLog), "")
 	showLogItem := logItem.AddSubMenuItem(text(msgTrayShowLog), "")
 	showVerboseLogItem := logItem.AddSubMenuItem(text(msgTrayShowVerboseLog), "")
@@ -85,6 +77,8 @@ func startTray(paths appPaths) {
 	}
 	go onClick(longItem, func() { setNotices(preBlockNoticesLong) })
 	go onClick(allItem, func() { setNotices(preBlockNoticesAll) })
+	// The menu runs in Terminal as the user. It asks for the password only for the actions that need it.
+	go onClick(settingsItem, func() { _ = openTerminal(quoteShell(paths.Binary)) })
 	go onClick(showLogItem, func() { _ = openLogFile(paths.Log) })
 	go onClick(showVerboseLogItem, func() { _ = openLogFile(paths.DebugLog) })
 	// The update needs the password and can show a new consent text, so it runs in Terminal.
