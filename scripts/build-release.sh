@@ -67,7 +67,8 @@ pack() {
 	write_licenses "$stage/THIRD_PARTY_LICENSES.txt" "$stage/clawdiator" "$stage/clawdiator-tray"
 	archive="$stage.tar.gz"
 	# Without these 2 settings, bsdtar adds files with the extended attributes of macOS, for example ._clawdiator.
-	(cd "$stage" && COPYFILE_DISABLE=1 tar --no-mac-metadata -czf "$archive" clawdiator clawdiator-tray README.md LICENSE THIRD_PARTY_LICENSES.txt)
+	# Without --no-xattrs, bsdtar writes the attributes in the headers, and GNU tar on Linux shows a warning for each file.
+	(cd "$stage" && COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs -czf "$archive" clawdiator clawdiator-tray README.md LICENSE THIRD_PARTY_LICENSES.txt)
 	listed=$(tar -tzf "$archive" | sort | tr '\n' ' ')
 	[ "$listed" = "LICENSE README.md THIRD_PARTY_LICENSES.txt clawdiator clawdiator-tray " ] || fail "$(basename "$archive") contains: $listed"
 	rm -rf "$stage"

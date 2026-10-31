@@ -5,7 +5,7 @@ Each provider has a list of supported countries. A use from another country can 
 The tool is for teams that agree to this block. It asks for the consent of the user before the installation.
 
 The tool works on macOS and on Linux with systemd. Windows comes in a later version.
-The Linux version is new. Nobody tested it on a real computer yet. Read the section "Linux".
+The Linux version is new. It is tested only in a virtual machine without a desktop. Read the section "Linux".
 
 ## How the tool works
 
@@ -302,5 +302,7 @@ MIT. Read [LICENSE](LICENSE). Each archive also contains `THIRD_PARTY_LICENSES.t
   They also covered the firewall rules, sleep and wake, and the uninstallation.
 - macOS on a Mac with an Intel processor: not tested.
 - macOS 12 to macOS 25: not tested. Go 1.26 supports macOS 12.
-- Linux: the unit tests pass on Linux. A test on a real computer is not done yet.
+- Linux: tested on 2026-10-31 in a virtual machine with Ubuntu 26.04 on arm64, without a desktop.
+  The tests covered the service, the block, the change of the network, the pause, the check for updates and the uninstallation.
+  The notices, the tray icon, a real sleep and Linux on amd64 are not tested.
 - Windows: not ready.

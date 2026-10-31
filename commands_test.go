@@ -52,8 +52,8 @@ func (m *fakeManager) Uninstall(appPaths) error {
 
 // newTestInstaller returns an installer under a temporary root, with a fake binary and a fake hosts file.
 func newTestInstaller(t *testing.T, answer string) (*installer, *fakeManager, *bytes.Buffer) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("this version installs only on macOS")
+	if runtime.GOOS == "windows" {
+		t.Skip("this version installs only on macOS and Linux")
 	}
 	root := t.TempDir()
 	paths := newAppPaths(root)
@@ -99,7 +99,7 @@ func TestInstallAndUninstall(t *testing.T) {
 		t.Errorf("the install must ask for the consent and register the service:\n%s", stdout.String())
 	}
 	if data, err := os.ReadFile(in.paths.Binary); err != nil || string(data) != "binary" {
-		t.Errorf("the binary must be in the app folder: %q, %v", data, err)
+		t.Errorf("the install must copy the binary: %q, %v", data, err)
 	}
 	if info, _ := os.Stat(in.paths.Binary); info.Mode().Perm() != 0o755 {
 		t.Errorf("the binary mode = %v", info.Mode())
@@ -136,7 +136,7 @@ func TestInstallAndUninstall(t *testing.T) {
 	if data, _ := os.ReadFile(in.paths.Hosts); string(data) != sampleHosts {
 		t.Errorf("the uninstall must remove the block:\n%s", data)
 	}
-	for _, path := range []string{in.paths.Dir, in.paths.Link} {
+	for _, path := range []string{in.paths.Dir, in.paths.ConfigDir, in.paths.LogDir, filepath.Dir(in.paths.Binary), in.paths.Link} {
 		if _, err := os.Lstat(path); !os.IsNotExist(err) {
 			t.Errorf("%s must not exist after the uninstall: %v", path, err)
 		}
@@ -211,6 +211,10 @@ func TestCommandStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := writeHostsFile(in.paths.Hosts, getBlockedHosts(c.state.blockedProviders())); err != nil {
+		t.Fatal(err)
+	}
+	// On Linux, the logs are not in the app folder.
+	if err := os.MkdirAll(in.paths.LogDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := appendLog(in.paths.Log, []string{"line 1", "line 2"}); err != nil {
@@ -369,6 +373,10 @@ func TestCommandStatusShowsLastFailure(t *testing.T) {
 func TestCommandStatusVerbose(t *testing.T) {
 	in, _, _ := newTestInstaller(t, "")
 	if err := saveServiceState(in.paths.State, &serviceState{Heartbeat: testStart}); err != nil {
+		t.Fatal(err)
+	}
+	// On Linux, the logs are not in the app folder.
+	if err := os.MkdirAll(in.paths.LogDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := appendLog(in.paths.Log, []string{"event line"}); err != nil {

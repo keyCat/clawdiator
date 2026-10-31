@@ -294,7 +294,8 @@ func (in *installer) commandUninstall() error {
 	}
 	report(msgStepRemoveSockets, os.RemoveAll(in.paths.SocketDir))
 	var folderErrs []error
-	for _, dir := range getAppFolders(in.paths) {
+	// On Linux and Windows, the binaries are not in the app folder.
+	for _, dir := range append(getAppFolders(in.paths), filepath.Dir(in.paths.Binary)) {
 		folderErrs = append(folderErrs, os.RemoveAll(dir))
 	}
 	report(msgStepRemoveFolder, errors.Join(folderErrs...))

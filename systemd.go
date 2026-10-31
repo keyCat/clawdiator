@@ -48,6 +48,9 @@ func (systemdManager) Uninstall(paths appPaths) error {
 	return nil
 }
 
+// errNoGraphicalSession tells install that the agents start only at the next login.
+var errNoGraphicalSession = errors.New("no graphical session is active")
+
 func (systemdManager) InstallAgents(paths appPaths, hasTray bool, userID int) error {
 	agent := renderSystemdUserUnit("clawdiator notices", []string{paths.Binary, "agent"}, "always")
 	if err := writeRootFile(paths.AgentFile, []byte(agent), 0o644); err != nil {
@@ -72,12 +75,12 @@ func (systemdManager) InstallAgents(paths appPaths, hasTray bool, userID int) er
 	}
 	machine, isSession := getUserMachine(userID)
 	if !isSession {
-		return nil
+		return errNoGraphicalSession
 	}
 	_, _ = runCommand("systemctl", "--user", machine, "daemon-reload")
 	// Outside a graphical session, for example over SSH, the tray has no place for the icon. The units start at the next login.
 	if _, err := runCommand("systemctl", "--user", machine, "is-active", "--quiet", "graphical-session.target"); err != nil {
-		return nil
+		return errNoGraphicalSession
 	}
 	_, err := runCommand("systemctl", append([]string{"--user", machine, "restart"}, units...)...)
 	return err
