@@ -3,6 +3,12 @@
 This file lists the changes of each version of clawdiator. The newest version is first.
 The text of each version is also on its release page on GitHub: https://github.com/keyCat/clawdiator/releases
 
+## Unreleased
+
+### Fixed
+
+- `clawdiator status` at once after `pause` or `resume` sometimes showed the old state. Now the service saves the state before it answers a command.
+
 ## v0.2.0 - 2026-10-31
 
 To install this version from v0.1.2, select "Install v0.2.0…" in the tray menu, or run `sudo clawdiator update`.

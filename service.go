@@ -260,7 +260,11 @@ func (d *serviceDriver) run(inputs loopInputs) {
 		case result := <-d.results:
 			d.handleResult(result)
 		case next := <-d.requests:
-			next.Reply <- d.handleRequest(next.commandRequest)
+			response := d.handleRequest(next.commandRequest)
+			// The state is on the disk before the reply. Then a status right after the command shows the change.
+			d.afterStep(false)
+			next.Reply <- response
+			continue
 		}
 		d.afterStep(false)
 	}

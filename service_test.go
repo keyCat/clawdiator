@@ -840,6 +840,28 @@ func TestDriverFirewallErrorOnceForPreBlocks(t *testing.T) {
 	}
 }
 
+// The loop saves the state before the reply. A status right after "pause" must show the pause.
+func TestLoopSavesStateBeforeReply(t *testing.T) {
+	td := newTestDriver(t)
+	ended := make(chan struct{})
+	go func() {
+		td.run(loopInputs{})
+		close(ended)
+	}()
+	defer func() {
+		td.stop()
+		<-ended
+	}()
+	reply := make(chan commandResponse, 1)
+	td.requests <- request{commandRequest: commandRequest{Command: socketPause, IsForever: true, User: "ivan"}, Reply: reply}
+	if response := <-reply; response.Code != codeOK {
+		t.Fatalf("pause = %+v", response)
+	}
+	if saved, err := loadServiceState(td.paths.State); err != nil || !saved.Pause.IsOn {
+		t.Errorf("state.json must have the pause at the time of the reply: %+v, %v", saved, err)
+	}
+}
+
 // A new process of the service takes over the token of the old process. pf then still has exactly 1 token of clawdiator.
 func TestDriverFirewallTakesOverToken(t *testing.T) {
 	pf := newFakePF()

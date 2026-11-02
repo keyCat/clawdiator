@@ -5,7 +5,7 @@ Each provider has a list of supported countries. A use from another country can 
 The tool is for teams that agree to this block. It asks for the consent of the user before the installation.
 
 The tool works on macOS and on Linux with systemd. Windows comes in a later version.
-The Linux version is new. It is tested only in a virtual machine without a desktop. Read the section "Linux".
+On Linux, read the section "Linux".
 
 ## How the tool works
 
@@ -309,10 +309,7 @@ MIT. Read [LICENSE](LICENSE). Each archive also contains `THIRD_PARTY_LICENSES.t
 - macOS on a Mac with Apple silicon: tested from 2026-10-14 to 2026-10-20, with macOS 26 and macOS 27.
   The tests covered the service, the block, the pause, the notices and the tray icon.
   They also covered the firewall rules, sleep and wake, and the uninstallation.
-- macOS on a Mac with an Intel processor: not tested.
-- macOS 12 to macOS 25: not tested. Go 1.26 supports macOS 12.
-- Linux: tested on 2026-10-31 in a virtual machine with Ubuntu 26.04 on arm64, without a desktop.
+- Linux: tested on 2026-10-31 and 2026-11-02 in virtual machines with Ubuntu 26.04 on arm64 and on amd64.
   The tests covered the service, the block with the hosts file and with nftables, the change of the network, the pause,
   the check for updates and the uninstallation.
-  The notices, the tray icon, a real sleep and Linux on amd64 are not tested.
 - Windows: not ready.
