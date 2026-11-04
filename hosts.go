@@ -46,12 +46,9 @@ func buildHostsBlock(hosts []string, isLineEndAdded bool) []string {
 // Then it adds a new block with the hosts at the end. With no hosts, it adds no block.
 // The other lines and their line ends stay the same.
 func replaceHostsBlock(content string, hosts []string) (string, error) {
-	lineEnd := "\n"
-	if strings.Contains(content, "\r\n") {
-		lineEnd = "\r\n"
-	}
 	var kept []string
 	isInBlock, isLineEndAdded := false, false
+	addedLineEnd := ""
 	for _, line := range strings.SplitAfter(content, "\n") {
 		trimmed := strings.TrimSpace(line)
 		switch {
@@ -61,6 +58,8 @@ func replaceHostsBlock(content string, hosts []string) (string, error) {
 			}
 			isInBlock = true
 			isLineEndAdded = strings.Contains(trimmed, hostsLineEndNote)
+			// The add put the same line end before the block as at the end of this line.
+			addedLineEnd = line[len(strings.TrimRight(line, "\r\n")):]
 		case strings.HasPrefix(trimmed, hostsEndMarker):
 			if !isInBlock {
 				return "", errorf(msgHostsNoBegin)
@@ -75,10 +74,15 @@ func replaceHostsBlock(content string, hosts []string) (string, error) {
 	}
 	result := strings.Join(kept, "")
 	if isLineEndAdded {
-		result = strings.TrimSuffix(strings.TrimSuffix(result, "\n"), "\r")
+		result = strings.TrimSuffix(result, addedLineEnd)
 	}
 	if len(hosts) == 0 {
 		return result, nil
+	}
+	// The line end comes from the file without the block, so the lines of the block cannot change it.
+	lineEnd := "\n"
+	if strings.Contains(result, "\r\n") {
+		lineEnd = "\r\n"
 	}
 	isNoFinalLineEnd := result != "" && !strings.HasSuffix(result, "\n")
 	if isNoFinalLineEnd {

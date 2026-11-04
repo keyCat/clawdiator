@@ -3,6 +3,12 @@
 This file lists the changes of each version of clawdiator. The newest version is first.
 The text of each version is also on its release page on GitHub: https://github.com/keyCat/clawdiator/releases
 
+## Unreleased
+
+### Fixed
+
+- The removal of the block gives the exact original hosts file also when the file ends with a lone carriage return. Before, the removal deleted this character. A fuzz test found this error.
+
 ## v0.2.1 - 2026-11-04
 
 To install this version from v0.2.0, select "Install v0.2.1…" in the tray menu, or run `sudo clawdiator update`.

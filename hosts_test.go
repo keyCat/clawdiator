@@ -196,3 +196,26 @@ func TestCommandHostsDryRun(t *testing.T) {
 		t.Errorf("--remove must call the removal of the block: %v, %v", isRemoveCalled, err)
 	}
 }
+
+// FuzzReplaceHostsBlock checks that the block leaves no trace: the add and the removal give the original file again.
+// A second add changes nothing. "go test" runs only the seeds. "go test -fuzz FuzzReplaceHostsBlock" searches for more inputs.
+func FuzzReplaceHostsBlock(f *testing.F) {
+	for _, seed := range []string{"", sampleHosts, "127.0.0.1 localhost", "a\r\nb\r\n", "a\r\nb", "\n\n", " # comment\t\n"} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, original string) {
+		if strings.Contains(original, hostsBeginMarker) || strings.Contains(original, hostsEndMarker) {
+			return
+		}
+		blocked, err := replaceHostsBlock(original, []string{"api.anthropic.com"})
+		if err != nil {
+			t.Fatalf("add: %v", err)
+		}
+		if again, err := replaceHostsBlock(blocked, []string{"api.anthropic.com"}); err != nil || again != blocked {
+			t.Fatalf("a second add must change nothing: %q, %v", again, err)
+		}
+		if removed, err := replaceHostsBlock(blocked, nil); err != nil || removed != original {
+			t.Fatalf("the removal must give the original:\n%q\n%q, %v", original, removed, err)
+		}
+	})
+}
