@@ -5,6 +5,11 @@ The text of each version is also on its release page on GitHub: https://github.c
 
 ## Unreleased
 
+### Added
+
+- The install with 1 command on macOS and Linux: `curl -fsSL https://github.com/keyCat/clawdiator/releases/latest/download/install.sh | sh`.
+  The script finds the correct archive, compares its checksum with `SHA256SUMS` and runs `sudo clawdiator install`. Read the section "Install" of the README.
+
 ### Fixed
 
 - `clawdiator status` at once after `pause` or `resume` sometimes showed the old state. Now the service saves the state before it answers a command.

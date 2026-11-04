@@ -30,9 +30,32 @@ A service runs in the background as root. It finds the country of the public IP 
 
 ## Install
 
+Run this command in a terminal on macOS or on Linux:
+
+```sh
+curl -fsSL https://github.com/keyCat/clawdiator/releases/latest/download/install.sh | sh
+```
+
+The script finds the archive for your computer and downloads it from the newest release.
+It compares the checksum of the archive with `SHA256SUMS`. Then it runs `sudo clawdiator install`. Type your password.
+The tool shows the consent text. Read it. Then type `yes`.
+
+To read the script before you run it, download it first:
+
+```sh
+curl -fsSLO https://github.com/keyCat/clawdiator/releases/latest/download/install.sh
+less install.sh
+sh install.sh
+```
+
+To give options to `install`, add them after `sh -s --`, for example `… | sh -s -- --blocked-countries AF`.
+On Linux without curl, use `wget -qO- https://github.com/keyCat/clawdiator/releases/latest/download/install.sh | sh`.
+
+### Install by hand
+
 These steps are for macOS. On Linux, the steps are almost the same. Read "Linux".
 
-### 1. Download the archive
+#### 1. Download the archive
 
 Download the archive for your Mac and the checksum file. Change `arm64` to `amd64` for a Mac with an Intel processor.
 
@@ -41,7 +64,7 @@ curl -LO https://github.com/keyCat/clawdiator/releases/latest/download/clawdiato
 curl -LO https://github.com/keyCat/clawdiator/releases/latest/download/SHA256SUMS
 ```
 
-### 2. Check the archive
+#### 2. Check the archive
 
 ```sh
 grep clawdiator-darwin-arm64.tar.gz SHA256SUMS | shasum -a 256 -c
@@ -49,7 +72,7 @@ grep clawdiator-darwin-arm64.tar.gz SHA256SUMS | shasum -a 256 -c
 
 Expected result: `clawdiator-darwin-arm64.tar.gz: OK`. If you see a different result, do not install the tool.
 
-### 3. Unpack the archive
+#### 3. Unpack the archive
 
 ```sh
 mkdir clawdiator
@@ -59,7 +82,7 @@ cd clawdiator
 
 The archive contains 2 binaries: `clawdiator` and `clawdiator-tray`. Keep them in the same folder. `install` copies both of them.
 
-### 4. The binaries and Gatekeeper
+#### 4. The binaries and Gatekeeper
 
 The binaries have no signature of Apple. A download with `curl` gets no quarantine mark, so macOS starts the binaries.
 A download with a browser gets the quarantine mark. Then macOS does not start the binaries. In that case, remove the mark:
@@ -70,7 +93,7 @@ xattr -d com.apple.quarantine clawdiator clawdiator-tray
 
 These 2 cases are still to confirm in a test of the first release.
 
-### 5. Install the service
+#### 5. Install the service
 
 ```sh
 sudo ./clawdiator install
@@ -100,7 +123,7 @@ To change a setting, run `install` again with the option. The other settings sta
 
 ## Linux
 
-The steps of "Install" are the same on Linux, with 2 differences. Use the archive `linux-amd64` or `linux-arm64`.
+The command of "Install" also works on Linux. The steps of "Install by hand" are the same on Linux, with 2 differences. Use the archive `linux-amd64` or `linux-arm64`.
 To see the architecture, run `uname -m`. The result `x86_64` means amd64. The result `aarch64` means arm64.
 Linux has no Gatekeeper, so step 4 is not necessary.
 

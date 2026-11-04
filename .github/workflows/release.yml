@@ -46,6 +46,7 @@ jobs:
             dist/release/clawdiator-linux-amd64.tar.gz \
             dist/release/clawdiator-linux-arm64.tar.gz \
             dist/release/SHA256SUMS \
+            install.sh \
             --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" \
             --notes-file "$RUNNER_TEMP/notes.md" \
