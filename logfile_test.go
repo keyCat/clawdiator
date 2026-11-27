@@ -85,17 +85,20 @@ func TestBuildTrayIcon(t *testing.T) {
 		if _, _, _, alpha := img.At(0, 0).RGBA(); alpha != 0 {
 			t.Errorf("state %d: the corner must be transparent", state)
 		}
-		red, green, blue, _ := img.At(8, 16).RGBA()
-		if uint8(red>>8) != want.R || uint8(green>>8) != want.G || uint8(blue>>8) != want.B {
-			t.Errorf("state %d: the circle must have the color %v", state, want)
+		if _, _, _, alpha := img.At(21, 2).RGBA(); (alpha > 0) != (state == trayGreen) {
+			t.Errorf("state %d: only the green paw should show claws", state)
 		}
-		red, green, blue, _ = img.At(trayIconSize/2, 12).RGBA()
+		red, green, blue, _ := img.At(11, 25).RGBA()
+		if uint8(red>>8) != want.R || uint8(green>>8) != want.G || uint8(blue>>8) != want.B {
+			t.Errorf("state %d: the pad must have the color %v", state, want)
+		}
+		red, green, blue, _ = img.At(trayIconSize/2, 20).RGBA()
 		isWhite := red == 0xFFFF && green == 0xFFFF && blue == 0xFFFF
 		if isWhite != (state == trayAlert) {
 			t.Errorf("state %d: only the alert icon has the white mark", state)
 		}
 	}
-	// The dot of a new version is in the upper right corner, on the circle.
+	// The dot of a new version is in the upper right corner, on the paw.
 	badged, _ := png.Decode(bytes.NewReader(buildTrayIcon(trayGreen, true)))
 	plain, _ := png.Decode(bytes.NewReader(buildTrayIcon(trayGreen, false)))
 	red, green, blue, _ := badged.At(25, 7).RGBA()

@@ -3,7 +3,11 @@
 This file lists the changes of each version of clawdiator. The newest version is first.
 The text of each version is also on its release page on GitHub: https://github.com/keyCat/clawdiator/releases
 
-## Unreleased
+## v0.3.0 - 2026-11-27
+
+### Changed
+
+- The tray icon is now a cat paw. The green paw shows its claws when access is open. All other states use the same paw with its claws retracted. A white exclamation mark indicates that the service is down, and a blue dot marks an available update.
 
 ### Fixed
 
