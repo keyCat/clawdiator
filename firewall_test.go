@@ -49,6 +49,9 @@ func (p *fakePF) run(input string, args ...string) (string, error) {
 		if strings.Contains(p.anchor, "160.79.104.0/23") {
 			lines = append(lines, "block drop out quick inet from any to 160.79.104.0/23")
 		}
+		if strings.Contains(p.anchor, "153.61.224.0/22") {
+			lines = append(lines, "block drop out quick inet from any to 153.61.224.0/22")
+		}
 		if strings.Contains(p.anchor, "2607:6bc0::/48") {
 			lines = append(lines, "block drop out quick inet6 from any to 2607:6bc0::/48")
 		}
@@ -104,7 +107,7 @@ func (p *fakePF) countCalls(joined string) int {
 }
 
 func TestRenderPFRules(t *testing.T) {
-	if got := renderPFRules(); got != "block drop out quick to { 160.79.104.0/23, 2607:6bc0::/48 }\n" {
+	if got := renderPFRules(); got != "block drop out quick to { 160.79.104.0/23, 153.61.224.0/22, 2607:6bc0::/48 }\n" {
 		t.Errorf("renderPFRules = %q", got)
 	}
 }
@@ -126,8 +129,8 @@ func TestPFParsers(t *testing.T) {
 	if hasPFAppleAnchor(`scrub-anchor "com.apple/*" all fragment reassemble`) || !hasPFAppleAnchor("x\n  anchor \"com.apple/*\" all") {
 		t.Error("hasPFAppleAnchor must not count the scrub anchor")
 	}
-	if !hasPFRules("block drop out quick inet from any to 160.79.104.0/23\nblock drop out quick inet6 from any to 2607:6bc0::/48") ||
-		hasPFRules("block drop out quick inet from any to 160.79.104.0/23") {
+	oldRules := "block drop out quick inet from any to 160.79.104.0/23\nblock drop out quick inet6 from any to 2607:6bc0::/48"
+	if hasPFRules(oldRules) || !hasPFRules(oldRules+"\nblock drop out quick inet from any to 153.61.224.0/22") {
 		t.Error("hasPFRules must find a rule for each range")
 	}
 }
@@ -141,7 +144,7 @@ func TestFirewallBlockAndUnblock(t *testing.T) {
 	}
 	load, enable := slices.Index(pf.calls, "-a com.apple/clawdiator -f -"), slices.Index(pf.calls, "-E")
 	kill := slices.Index(pf.calls, "-k 0.0.0.0/0 -k 160.79.104.0/23")
-	if load < 0 || enable < load || kill < enable || pf.countCalls("-k ::/0 -k 2607:6bc0::/48") != 1 {
+	if load < 0 || enable < load || kill < enable || pf.countCalls("-k 0.0.0.0/0 -k 153.61.224.0/22") != 1 || pf.countCalls("-k ::/0 -k 2607:6bc0::/48") != 1 {
 		t.Errorf("the order must be: load, switch-on, removal of the states: %q", pf.calls)
 	}
 	if err := firewall.Unblock(token); err != nil || pf.anchor != "" || len(pf.tokens) != 0 || pf.isEnabled {

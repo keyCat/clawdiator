@@ -12,11 +12,11 @@ import (
 )
 
 // anthropicRanges are the published ranges of the addresses where Anthropic receives requests.
-// Source: https://docs.claude.com/en/api/ip-addresses. The ranges are from anthropicRangesDate.
-var anthropicRanges = []string{"160.79.104.0/23", "2607:6bc0::/48"}
+// Source: https://platform.claude.com/docs/en/api/ip-addresses. The ranges are from anthropicRangesDate.
+var anthropicRanges = []string{"160.79.104.0/23", "153.61.224.0/22", "2607:6bc0::/48"}
 
 const (
-	anthropicRangesDate = "2026-10-14"
+	anthropicRangesDate = "2026-11-27"
 	// pfAnchor is the anchor of the rules. /etc/pf.conf of macOS has the line anchor "com.apple/*",
 	// so pf evaluates this anchor without a change of /etc/pf.conf.
 	pfAnchor = "com.apple/clawdiator"
@@ -34,7 +34,7 @@ const (
 // because it does not change the main rule set.
 var errFirewallNoEffect = errors.New(`the main rule set of pf has no line ` + pfAppleAnchorRule + `, so the rules have no effect`)
 
-// renderPFRules returns the rules of the anchor. pf makes 1 rule for IPv4 and 1 rule for IPv6 from the list.
+// renderPFRules returns the rules of the anchor. pf makes a rule for each address range.
 // The rule drops the packets and sends nothing. The test of 2026-10-16 showed that "block return" on macOS sends a reset
 // with the address of Anthropic as the source into the network interface, for example into a VPN. The app did not get the reset,
 // so "return" gave no benefit.

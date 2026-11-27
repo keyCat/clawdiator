@@ -8,17 +8,17 @@ import (
 	"testing"
 )
 
-// nftListOutput is the output of "nft list table inet clawdiator" of nftables 1.1.6 after the load of renderNftRules.
+// nftListOutput models the installed table as printed by nft.
 const nftListOutput = `table inet clawdiator {
 	chain output {
 		type filter hook output priority filter; policy accept;
-		ip daddr 160.79.104.0/23 drop
+		ip daddr { 153.61.224.0/22, 160.79.104.0/23 } drop
 		ip6 daddr 2607:6bc0::/48 drop
 	}
 
 	chain forward {
 		type filter hook forward priority filter; policy accept;
-		ip daddr 160.79.104.0/23 drop
+		ip daddr { 153.61.224.0/22, 160.79.104.0/23 } drop
 		ip6 daddr 2607:6bc0::/48 drop
 	}
 }`
@@ -57,19 +57,18 @@ func (n *fakeNft) run(input string, args ...string) (string, error) {
 	return "", fmt.Errorf("unexpected call: nft %s", joined)
 }
 
-// The script is the same as the script of the test in an Ubuntu VM with nftables 1.1.6 on 2026-10-31.
 func TestRenderNftRules(t *testing.T) {
 	want := `add table inet clawdiator
 delete table inet clawdiator
 table inet clawdiator {
 	chain output {
 		type filter hook output priority 0; policy accept;
-		ip daddr { 160.79.104.0/23 } drop
+		ip daddr { 160.79.104.0/23, 153.61.224.0/22 } drop
 		ip6 daddr { 2607:6bc0::/48 } drop
 	}
 	chain forward {
 		type filter hook forward priority 0; policy accept;
-		ip daddr { 160.79.104.0/23 } drop
+		ip daddr { 160.79.104.0/23, 153.61.224.0/22 } drop
 		ip6 daddr { 2607:6bc0::/48 } drop
 	}
 }
@@ -94,6 +93,7 @@ func TestNftFirewall(t *testing.T) {
 	forward := nftListOutput[strings.Index(nftListOutput, "\n\n\tchain forward"):strings.LastIndex(nftListOutput, "\n}")]
 	lastRule := strings.LastIndex(nftListOutput, "\t\tip6 daddr")
 	for name, table := range map[string]string{
+		"previous range list":     strings.ReplaceAll(nftListOutput, "{ 153.61.224.0/22, 160.79.104.0/23 }", "160.79.104.0/23"),
 		"no table":                "",
 		"no chain forward":        strings.Replace(nftListOutput, forward, "", 1),
 		"no IPv6 rule in 1 chain": nftListOutput[:lastRule] + nftListOutput[strings.Index(nftListOutput[lastRule:], "\n")+lastRule+1:],

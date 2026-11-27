@@ -3,6 +3,12 @@
 This file lists the changes of each version of clawdiator. The newest version is first.
 The text of each version is also on its release page on GitHub: https://github.com/keyCat/clawdiator/releases
 
+## v0.3.1 - 2026-11-27
+
+### Fixed
+
+- The macOS and Linux firewalls now include Anthropic’s inbound IPv4 range `153.61.224.0/22` when a block is active.
+
 ## v0.3.0 - 2026-11-27
 
 ### Changed
